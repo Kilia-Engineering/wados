@@ -8,4 +8,4 @@ jobs:
         with:
           fetch-depth: 0
       - run: |
-          git push --mirror https://x-access-token:${{ secrets.mirror }}@github.com/Kilia-Engineering/wados.git
+          git push --mirror https://x-access-token:${{ secrets.MIRROR }}@github.com/Kilia-Engineering/wados.git
