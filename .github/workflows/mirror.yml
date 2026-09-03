@@ -1,0 +1,11 @@
+name: Mirror to Kilia Engineering
+on: [push, delete]
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          git push --mirror https://x-access-token:${{ secrets.mirror }}@github.com/Kilia-Engineering/wados.git
