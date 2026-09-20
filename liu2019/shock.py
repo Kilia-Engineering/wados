@@ -257,3 +257,43 @@ def taylor_maccoll_cone_field(Ma, beta_deg, gamma=1.4):
     Vr_spline = UnivariateSpline(theta_pts, Vr_pts, k=k, s=0.0)
     Vt_spline = UnivariateSpline(theta_pts, Vt_pts, k=k, s=0.0)
     return Vr_spline, Vt_spline, delta_c_rad, float(beta)
+
+
+# ---------------------------------------------------------------------------
+# Prandtl-Meyer expansion
+# ---------------------------------------------------------------------------
+
+def prandtl_meyer(Ma, gamma=1.4):
+    """Prandtl-Meyer function nu(Ma) in degrees.
+
+    Accepts a scalar or an array. Values at ``Ma <= 1`` are returned as 0.
+    """
+    Ma = np.asarray(Ma, dtype=float)
+    m2m1 = np.clip(Ma * Ma - 1.0, 0.0, None)
+    k = np.sqrt((gamma + 1.0) / (gamma - 1.0))
+    nu = (k * np.arctan(np.sqrt(m2m1) / k) - np.arctan(np.sqrt(m2m1)))
+    out = np.degrees(nu)
+    return float(out) if out.ndim == 0 else out
+
+
+def prandtl_meyer_max(gamma=1.4):
+    """Maximum turn angle (degrees) -- expansion to vacuum, ``Ma -> inf``."""
+    k = np.sqrt((gamma + 1.0) / (gamma - 1.0))
+    return float(np.degrees((k - 1.0) * np.pi / 2.0))
+
+
+def isentropic_pressure_ratio(Ma1, Ma2, gamma=1.4):
+    """``p2/p1`` between two states on the same isentrope (same p0).
+
+    Accepts scalars or arrays for ``Ma2``.
+    """
+    Ma2 = np.asarray(Ma2, dtype=float)
+    num = 1.0 + 0.5 * (gamma - 1.0) * float(Ma1) ** 2
+    den = 1.0 + 0.5 * (gamma - 1.0) * Ma2 ** 2
+    out = (num / den) ** (gamma / (gamma - 1.0))
+    return float(out) if out.ndim == 0 else out
+
+
+def cp_vacuum(Ma, gamma=1.4):
+    """Pressure coefficient in the vacuum limit, ``p -> 0``."""
+    return float(-2.0 / (gamma * float(Ma) ** 2))

@@ -31,6 +31,10 @@ from .shock import (
     beta_detachment,
     mach_angle,
     oblique_shock_ratios,
+    prandtl_meyer,
+    prandtl_meyer_max,
+    isentropic_pressure_ratio,
+    cp_vacuum,
     taylor_maccoll_cone_angle,
 )
 
@@ -62,6 +66,10 @@ __all__ = [
     "beta_detachment",
     "mach_angle",
     "oblique_shock_ratios",
+    "prandtl_meyer",
+    "prandtl_meyer_max",
+    "isentropic_pressure_ratio",
+    "cp_vacuum",
     "taylor_maccoll_cone_angle",
     "OsculatingPlaneData",
     "curvature_radius_ICC",
