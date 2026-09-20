@@ -362,10 +362,17 @@ class AeroCanvas(FigureCanvas):
     def _draw_reference(self):
         ma_list = sorted(PAPER_REFERENCE_AERO.keys())
         for key, ax in self.axes.items():
-            vals = [PAPER_REFERENCE_AERO[m][key] for m in ma_list]
-            ax.plot(ma_list, vals, marker="o", linestyle="--",
-                    color="#888888", markerfacecolor="none",
-                    label="Paper Fig. 12")
+            # Some Fig. 12 columns have no usable reference (mis-scaled on
+            # the original graph read -- see liu2019.config). Plot only the
+            # Mach points that do, so those panes show the computed curve
+            # alone instead of a broken reference line.
+            pts = [(m, PAPER_REFERENCE_AERO[m][key]) for m in ma_list
+                   if PAPER_REFERENCE_AERO[m].get(key) is not None]
+            if pts:
+                ax.plot([m for m, _ in pts], [v for _, v in pts],
+                        marker="o", linestyle="--",
+                        color="#888888", markerfacecolor="none",
+                        label="Paper Fig. 12")
             ax.set_title(key, color="white")
             ax.set_xlabel("Ma", color="#AAAAAA")
             ax.grid(True, alpha=0.2, color="#555555")
@@ -1079,18 +1086,32 @@ class Liu2019WaveriderTab(QWidget):
         t = self.validation_table
         t.setRowCount(len(rows))
         passed = 0
+        scored = 0
         for i, (name, v, ref, dev, ok) in enumerate(rows):
             t.setItem(i, 0, QTableWidgetItem(name))
             t.setItem(i, 1, QTableWidgetItem(f"{v:.4f}"))
             t.setItem(i, 2, QTableWidgetItem("—" if ref is None else f"{ref:.4f}"))
             t.setItem(i, 3, QTableWidgetItem("—" if ref is None else f"{dev*100:+.2f}%"))
-            status_item = QTableWidgetItem("PASS" if ok else "FAIL")
-            status_item.setForeground(QColor("#6CBB6C" if ok else "#E06C6C"))
+            # A row with no usable paper reference was never checked, so it
+            # is shown as SKIP and kept out of the tally rather than
+            # counted as a pass (which would inflate the score).
+            if ref is None:
+                status_item = QTableWidgetItem("SKIP")
+                status_item.setForeground(QColor("#888888"))
+            else:
+                scored += 1
+                passed += int(ok)
+                status_item = QTableWidgetItem("PASS" if ok else "FAIL")
+                status_item.setForeground(
+                    QColor("#6CBB6C" if ok else "#E06C6C"))
             t.setItem(i, 4, status_item)
-            passed += int(ok)
 
-        total = len(rows)
-        self.validation_btn.setText(f"Validation: {passed}/{total} pass")
+        total = scored
+        skipped = len(rows) - scored
+        label = f"Validation: {passed}/{total} pass"
+        if skipped:
+            label += f" ({skipped} skipped)"
+        self.validation_btn.setText(label)
         colour = "#2B5B2B" if passed == total else "#5B2B2B"
         self.validation_btn.setStyleSheet(
             f"QPushButton {{ background-color: {colour}; color: white; "

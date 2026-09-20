@@ -34,12 +34,54 @@ PAPER_REFERENCE_GEOMETRY = {
     "eta":       0.0797,
 }
 
-# Paper Fig. 12 — approximate aerodynamic reference values (graph reading, +/-5%)
-PAPER_REFERENCE_AERO = {
+# Paper Fig. 12 — values as originally read off the graph (+/-5% claimed).
+#
+# These are kept verbatim for traceability ONLY. Two of the five columns are
+# provably mis-scaled: any set of aerodynamic coefficients normalised by a
+# common reference area must satisfy
+#
+#     (1)  CL / CD   == L/D
+#     (2)  Cmz / CL  == Xcp          (Cmz about the nose, over L_ref)
+#
+# Neither holds, and the violation drifts with Mach, so it is not a single
+# missing constant:
+#
+#     Ma      CL/CD   vs L/D      Cmz/CL   vs Xcp
+#      6      0.227   19.4x       2.971    4.38x
+#      8      0.198   25.3x       3.438    5.06x
+#     10      0.181   29.9x       3.692    5.45x
+#     13      0.173   33.5x       4.000    5.90x
+#
+# A wrong CL cannot explain it either: identity (1) would need CL = CD*(L/D)
+# = 3.388 at Ma 6, identity (2) would need CL = Cmz/Xcp = 0.767. Those
+# disagree, so at least two columns are bad, and the minimal consistent
+# reading is that CD and Cmz are the mis-scaled ones.
+#
+# This is NOT a reference-area problem. Solving for the S_ref that would
+# reconcile each column against the evaluator gives 1.837 m^2 from CL,
+# 0.067 m^2 from CD and 0.411 m^2 from Cmz -- and a reference area is one
+# number. (L/D and Xcp are S_ref-free, so they are unaffected either way.)
+PAPER_FIG12_AS_READ = {
     6:  {"CL": 0.175, "CD": 0.77, "L_D": 4.4, "Cmz": 0.52, "Xcp": 0.678},
     8:  {"CL": 0.160, "CD": 0.81, "L_D": 5.0, "Cmz": 0.55, "Xcp": 0.679},
     10: {"CL": 0.130, "CD": 0.72, "L_D": 5.4, "Cmz": 0.48, "Xcp": 0.678},
     13: {"CL": 0.090, "CD": 0.52, "L_D": 5.8, "Cmz": 0.36, "Xcp": 0.678},
+}
+
+# Reference values actually used for validation. ``None`` means "no usable
+# reference" -- consumers skip those rather than scoring the solver against
+# a number known to be wrong. Re-reading CD and Cmz off Fig. 12 (or taking
+# them from the paper's text) is the only way to restore them; until then
+# the honest comparison is CL, L/D and Xcp.
+PAPER_REFERENCE_AERO = {
+    Ma: {
+        "CL":  row["CL"],
+        "CD":  None,          # mis-scaled, see above
+        "L_D": row["L_D"],
+        "Cmz": None,          # mis-scaled, see above
+        "Xcp": row["Xcp"],
+    }
+    for Ma, row in PAPER_FIG12_AS_READ.items()
 }
 
 # Aerodynamic reference dimensions (paper Section 4.2)

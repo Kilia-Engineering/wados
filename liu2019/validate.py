@@ -23,6 +23,59 @@ def _pass(value, reference, fractional_tol):
     return abs(dev) <= fractional_tol, dev
 
 
+def check_reference_consistency(reference=None, rel_tol: float = 0.05,
+                                verbose: bool = True):
+    """Assert the reference aero table obeys its own definitions.
+
+    Coefficients normalised by a common reference area must satisfy two
+    identities, independent of what that area is:
+
+        CL / CD  == L/D
+        Cmz / CL == Xcp
+
+    A reference row that violates either one cannot be matched by any
+    solver, so scoring against it says nothing about the solver. This
+    check exists so that a future re-read of Fig. 12 is validated before
+    it is trusted -- the original read had CD and Cmz mis-scaled by
+    19-34x and 4.4-5.9x respectively (see :mod:`liu2019.config`).
+
+    Entries whose value is ``None`` are skipped, not failed.
+
+    Returns ``(ok, problems)`` where ``problems`` is a list of dicts.
+    """
+    if reference is None:
+        reference = PAPER_REFERENCE_AERO
+    problems = []
+    for Ma in sorted(reference):
+        row = reference[Ma]
+        CL, CD  = row.get("CL"),  row.get("CD")
+        L_D     = row.get("L_D")
+        Cmz     = row.get("Cmz")
+        Xcp     = row.get("Xcp")
+        if None not in (CL, CD, L_D) and CD != 0 and L_D != 0:
+            got = CL / CD
+            if abs(got - L_D) / abs(L_D) > rel_tol:
+                problems.append({"Ma": Ma, "identity": "CL/CD == L/D",
+                                 "lhs": got, "rhs": L_D,
+                                 "factor": L_D / got if got else float("inf")})
+        if None not in (CL, Cmz, Xcp) and CL != 0 and Xcp != 0:
+            got = Cmz / CL
+            if abs(got - Xcp) / abs(Xcp) > rel_tol:
+                problems.append({"Ma": Ma, "identity": "Cmz/CL == Xcp",
+                                 "lhs": got, "rhs": Xcp,
+                                 "factor": got / Xcp if Xcp else float("inf")})
+    if verbose:
+        if problems:
+            print("Reference aero table is INTERNALLY INCONSISTENT:")
+            for p in problems:
+                print(f"  Ma {p['Ma']:>2}  {p['identity']:<16} "
+                      f"got {p['lhs']:.3f} vs {p['rhs']:.3f} "
+                      f"({p['factor']:.2f}x off)")
+        else:
+            print("Reference aero table: internally consistent.")
+    return (not problems), problems
+
+
 def run_paper_validation(params: Dict = None,
                          n_z: int = 200,
                          n_x: int = 100,
@@ -58,15 +111,20 @@ def run_paper_validation(params: Dict = None,
         for r in aero_rows:
             ref = PAPER_REFERENCE_AERO.get(int(r["Ma"]), {})
             for key in ("CL", "CD", "L_D", "Cmz", "Xcp"):
-                ok, dev = _pass(r[key], ref.get(key), TOLERANCES[key])
+                ref_v = ref.get(key)
+                ok, dev = _pass(r[key], ref_v, TOLERANCES[key])
                 aero_checks.append({
                     "Ma":       r["Ma"],
                     "metric":   key,
                     "computed": r[key],
-                    "reference": ref.get(key),
+                    "reference": ref_v,
                     "deviation": dev,
                     "tolerance": TOLERANCES[key],
                     "pass":     ok,
+                    # No usable reference -> skipped, not passed. Counting
+                    # it as a pass would inflate the score with rows that
+                    # were never actually checked.
+                    "comparable": ref_v is not None,
                 })
 
     if verbose:
@@ -85,16 +143,26 @@ def run_paper_validation(params: Dict = None,
                   f"{'paper':>8} {'dev':>8} {'tol':>6}  status")
             for c in aero_checks:
                 ref = c["reference"]
-                status = "PASS" if c["pass"] else "FAIL"
+                if not c.get("comparable", True):
+                    status = "SKIP"
+                else:
+                    status = "PASS" if c["pass"] else "FAIL"
                 ref_s = f"{ref:>8.3f}" if ref is not None else "      --"
                 print(f"  {int(c['Ma']):>3} {c['metric']:>5} "
                       f"{c['computed']:>10.3f} {ref_s} "
                       f"{c['deviation']*100:>7.2f}% "
                       f"{c['tolerance']*100:>5.1f}%  {status}")
 
-    n_pass = sum(1 for c in geom_checks + aero_checks if c["pass"])
-    n_total = len(geom_checks) + len(aero_checks)
+    all_checks = geom_checks + aero_checks
+    scored = [c for c in all_checks if c.get("comparable", True)]
+    n_pass = sum(1 for c in scored if c["pass"])
+    n_total = len(scored)
+    n_skipped = len(all_checks) - len(scored)
+    if verbose and n_skipped:
+        print(f"\n{n_skipped} aero check(s) skipped: no usable paper "
+              f"reference (see liu2019.config.PAPER_REFERENCE_AERO).")
     return {
+        "skipped": n_skipped,
         "waverider": wr,
         "geometry":  geom,
         "aero":      aero_rows,

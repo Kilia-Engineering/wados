@@ -11,6 +11,7 @@ from .config import (
     PAPER_PARAMS,
     PAPER_TRAJECTORY,
     PAPER_REFERENCE_GEOMETRY,
+    PAPER_FIG12_AS_READ,
     PAPER_REFERENCE_AERO,
     TOLERANCES,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "PAPER_PARAMS",
     "PAPER_TRAJECTORY",
     "PAPER_REFERENCE_GEOMETRY",
+    "PAPER_FIG12_AS_READ",
     "PAPER_REFERENCE_AERO",
     "TOLERANCES",
     "Ma_distribution",

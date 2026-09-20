@@ -4,11 +4,45 @@ Implementation
 --------------
 Uses **modified Newtonian** impact theory on the triangulated surfaces.
 Newtonian theory is the closest analytic analogue to the inviscid Euler
-CFD reported in paper Fig. 12 and is sufficient for trend validation
-(CL, CD, L/D, Cmz vs Ma) within the paper's +/- 10% aero tolerance.
+CFD reported in paper Fig. 12.
 
-If PySAGAS is installed, the evaluator can be extended to call it via
-``Liu2019AeroEvaluator.evaluate(..., solver="pysagas")``.
+Normalisation
+-------------
+``_evaluate_surface`` returns per-panel force already divided by the
+free-stream dynamic pressure (``dF/q_inf = -Cp * A * n_hat``), so the
+summed force carries units of area. The coefficients are therefore
+
+    CL, CD = (F . dir) / S_ref                  [m^2 / m^2 -> dimensionless]
+    Cmz    = Mz / (S_ref * L_ref)               [m^3 / m^3 -> dimensionless]
+    Xcp    = (Mz / Fy) / L_ref                  [m   / m   -> fraction of L]
+
+which is the standard convention and is internally consistent: at
+``alpha = 0`` the definitions force ``Cmz / CL == Xcp`` identically, and
+the evaluator reproduces that to machine precision. ``S_ref = 1.0 m^2``
+comes from paper Section 4.2; ``L_ref = 6.0 m`` is the vehicle length.
+
+``L/D`` and ``Xcp`` are independent of ``S_ref``, so they are the only
+quantities here that can be compared against the paper without trusting
+the reference area. ``Xcp`` agrees to within 1.9%.
+
+Known model limitations (not defects)
+-------------------------------------
+* At fixed ``alpha`` the only Mach dependence is ``Cp_max(Ma)``, which
+  scales lift and drag by the same factor. **L/D is therefore exactly
+  Mach-independent** in this model (6.2527 across the whole paper
+  trajectory). Fig. 12's L/D trend of 4.4 -> 5.8 cannot be reproduced by
+  Newtonian theory at ``alpha = 0``, no matter how good the geometry is.
+* Newtonian puts zero pressure on the shadowed upper surface and models
+  no skin friction or base drag, so it over-predicts L/D (here by ~42%
+  against Fig. 12's Ma 6 point).
+
+Reproducing the Fig. 12 trend needs a solver that carries upper-surface
+pressure recovery and viscous drag -- e.g. the vendored ``pysagas`` panel
+method. If PySAGAS is installed, the evaluator can be extended to call it
+via ``Liu2019AeroEvaluator.evaluate(..., solver="pysagas")``.
+
+See :data:`liu2019.config.PAPER_REFERENCE_AERO` for why the Fig. 12 CD and
+Cmz columns are not usable as references.
 """
 
 from typing import Dict, Optional
