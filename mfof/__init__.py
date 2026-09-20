@@ -1,14 +1,18 @@
 """Multi-Flowfield Osculating Framework (MFOF).
 
-Phase 2 architectural refactor of the Liu 2019 osculating-cone waverider into
-a plug-in framework. Each spanwise osculating plane carries its own
-:class:`BasicFlowfield` instance, supplied by a factory at sweep time. Phase 2
-ships only :class:`ConeFlowfield`; future phases will add ``PowerLawFlowfield``,
-``WedgeFlowfield``, etc., and eventually allow different flowfield types to
-coexist in a single waverider.
+Architectural refactor of the Liu 2019 osculating-cone waverider into a
+plug-in framework. Each spanwise osculating plane carries its own
+:class:`BasicFlowfield` instance, supplied by a factory at sweep time.
+Three concrete flowfields ship today -- :class:`ConeFlowfield`,
+:class:`WedgeFlowfield` and :class:`PowerLawFlowfield` -- and the factory
+signature ``(z, Ma_z) -> BasicFlowfield`` already allows different types to
+coexist in a single waverider; exposing that mixing in the GUI is still to
+come.
 
-When the all-cone factory is used, ``MFOF`` reproduces ``liu2019`` numerically
-to within ``1e-6`` -- see :func:`mfof.validate.run_equivalence_test`.
+With the factory that mirrors Liu's per-plane physics -- ``WedgeFlowfield``
+in the flat region, ``ConeFlowfield`` in the curved region -- ``MFOF``
+reproduces ``liu2019`` numerically to within ``1e-6`` -- see
+:func:`mfof.validate.run_equivalence_test`.
 """
 
 from .basic_flowfield import BasicFlowfield, StreamlineResult

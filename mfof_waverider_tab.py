@@ -1,19 +1,22 @@
-"""GUI tab for the MFOF (Multi-Flowfield Osculating Framework) waverider — Phase 2.
+"""GUI tab for the MFOF (Multi-Flowfield Osculating Framework) waverider.
 
 A thin subclass of :class:`Liu2019WaveriderTab` that routes geometry and
-aerodynamics through the :mod:`mfof` package with an all-cone factory. Output
-is numerically identical (within ``1e-6`` relative) to the Liu 2019 tab when
-the same parameters are used; the equivalence is gated by
-:func:`mfof.validate.run_equivalence_test`.
+aerodynamics through the :mod:`mfof` package, with the basic flowfield
+selectable per build.
 
 The subclass adds:
 
-* a "Flowfield (Phase 2: cone only)" group in the left input panel with a
-  disabled :class:`QComboBox` (placeholder for future phase additions),
-* a "MFOF equivalence vs Liu 2019" row in the Validation sub-tab.
+* a "Flowfield" group in the left input panel: a live combobox
+  (cone / wedge / power-law) plus the power-law exponent ``n``,
+* a "Flowfield diagnostics" sub-tab in the right panel,
+* a "MFOF framework equivalence vs Liu 2019" row in the Validation sub-tab.
 
-Future phases will add :class:`PowerLawFlowfield`, :class:`WedgeFlowfield`
-options to the combobox and allow mixed-flowfield waveriders.
+Note that no single selection here reproduces the Liu 2019 tab: Liu
+dispatches *per plane*, using 2D wedge flow in the flat region
+``|z| <= L_s`` and osculating-cone flow outboard of it. That mixed
+configuration is what :func:`mfof.validate.run_equivalence_test` builds,
+and it matches ``liu2019`` to ~1e-13. Letting the user mix flowfield
+types across the span from this tab is still to come.
 """
 
 from __future__ import annotations
@@ -58,12 +61,15 @@ class _MFOFGeometryWorker(QThread):
 
     Dispatches by ``flowfield_type``:
 
-    * ``"cone"`` (default): all-cone factory -- byte-identical to the
-      Phase 2 production path, so the equivalence test still passes at 1e-13.
+    * ``"cone"`` (default): all-cone factory. Note this is NOT the same
+      as the Liu 2019 tab: Liu uses 2D wedge flow in the flat region
+      ``|z| <= L_s`` and cone flow only outboard of it, so an all-cone
+      build compresses harder and yields a larger volume.
     * ``"wedge"``: all-wedge factory using ``WedgeFlowfield``.
     * ``"power-law"``: all-power-law factory with the supplied exponent
-      ``n``. Routes through ``mfof.moc`` (axisymmetric MOC); ~2 min for
-      a 200-plane sweep at default mesh density.
+      ``n``. Routes through ``mfof.moc`` (axisymmetric MOC); tens of
+      seconds for a 200-plane sweep at default mesh density (Gate D
+      budgets 180 s).
     """
     finished_ok = pyqtSignal(object)   # emits MFOFWaverider
     failed      = pyqtSignal(str)
@@ -88,8 +94,8 @@ class _MFOFGeometryWorker(QThread):
             # ------------------------------------------------------------
             # Factory dispatch -- uniform per type.
             #
-            # * Cone:      Phase 2 production path, byte-identical to
-            #              Liu 2019 (equivalence test still 1e-13).
+            # * Cone:      uniform Taylor-Maccoll. Differs from the Liu
+            #              2019 tab in the flat region (see class docstring).
             # * Wedge:     uniform (no apex singularity).
             # * Power-law: uniform. PowerLawFlowfield internally clamps
             #              x_LE to 1e-9 for the singular centerline case
@@ -202,8 +208,7 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         """Phase 3: live combobox + conditional ``n`` spinbox.
 
         The default selection is "Cone (Taylor-Maccoll)", which routes
-        through the same code path as the Phase 2 production cone build,
-        so the equivalence test still passes at 1e-13 on first open.
+        through the Phase 2 production cone build.
         """
         g = QGroupBox("Flowfield")
         grid = QGridLayout(g)
@@ -226,9 +231,10 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
             "compression than the cone.<br>"
             "<b>Power-law (axisymmetric MOC):</b> Rodi 2005 / Mazhul 2004. "
             "Curved streamline traced by axisymmetric MOC. "
-            "Generation takes ~2 min at default mesh density.<br><br>"
-            "Default selection 'Cone' reproduces the Liu 2019 tab to "
-            "1e-13.")
+            "Generation is slower than cone/wedge (MOC per plane).<br><br>"
+            "Note: 'Cone' is uniform across the span, whereas the Liu "
+            "2019 tab uses wedge flow inboard of L_s and cone flow "
+            "outboard, so the two differ in the flat region.")
         self.flowfield_combo.currentIndexChanged.connect(
             self._on_flowfield_changed)
         grid.addWidget(self.flowfield_combo, 0, 1)
@@ -255,8 +261,8 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
 
         # ---- Note ----
         note = QLabel(
-            "Cone matches Liu 2019 bit-identically. Wedge is shallower. "
-            "Power-law uses MOC and takes ~2 min per generate.")
+            "Cone is uniform Taylor-Maccoll (Liu 2019 uses wedge flow "
+            "inboard of L_s). Wedge is shallower. Power-law uses MOC.")
         note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; "
                            f"font-style: italic;")
         note.setWordWrap(True)
@@ -318,7 +324,7 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         # Hint to the user that power-law takes much longer than cone/wedge
         if ftype == "power-law":
             self.progress_bar.setFormat(
-                "Generating power-law waverider (MOC, ~2 min)...")
+                "Generating power-law waverider (MOC)...")
         else:
             self.progress_bar.setFormat("")
 
@@ -329,29 +335,32 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         self._geom_worker.start()
 
     def _on_geometry_ready(self, wr):
-        """After MFOF geometry is built:
+        """After MFOF geometry is built, run the framework regression check.
 
-        * If the cone flowfield was used, run the Liu-vs-MFOF equivalence
-          test (it should still pass at 1e-13).
-        * If wedge or power-law was used, the equivalence test is not
-          meaningful (different physics) -- skip it and mark "n/a".
+        :func:`mfof.validate.run_equivalence_test` is self-contained: it
+        builds *both* sides itself (``liu2019``, and MFOF with the mixed
+        wedge/cone factory that mirrors Liu's per-plane physics) and
+        compares them. It therefore validates the MFOF sweep machinery,
+        not the geometry currently on screen, so it is meaningful for
+        every flowfield selection -- including wedge and power-law -- and
+        runs unconditionally.
+
+        (An earlier version ran it only in cone mode, on the assumption
+        that an all-cone MFOF build equals ``liu2019``. It does not:
+        ``liu2019`` uses 2D wedge flow in the flat region ``|z| <= L_s``.)
 
         Then call the base class to refresh canvases and metric cards.
         """
         ftype = self._current_flowfield_key()
-        if ftype == "cone":
-            try:
-                self._equivalence_pass = run_equivalence_test(
-                    self._read_params(),
-                    n_z=self.n_z_spin.value(),
-                    n_x=self.n_x_spin.value(),
-                    verbose=False,
-                )
-            except Exception:
-                self._equivalence_pass = False
-        else:
-            # Equivalence to Liu 2019 only meaningful for the cone path.
-            self._equivalence_pass = None
+        try:
+            self._equivalence_pass = run_equivalence_test(
+                self._read_params(),
+                n_z=self.n_z_spin.value(),
+                n_x=self.n_x_spin.value(),
+                verbose=False,
+            )
+        except Exception:
+            self._equivalence_pass = False
         super()._on_geometry_ready(wr)
         # Update the diagnostics sub-tab if it exists (built in _build_right_panel)
         if hasattr(self, "_diag_canvas") and self._diag_canvas is not None:
@@ -395,7 +404,8 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
             ok_str = "FAIL"
             colour = QColor("#E06C6C")
 
-        t.setItem(n, 0, QTableWidgetItem("MFOF equivalence vs Liu 2019"))
+        t.setItem(n, 0, QTableWidgetItem(
+            "MFOF framework equivalence vs Liu 2019"))
         t.setItem(n, 1, QTableWidgetItem("—"))
         t.setItem(n, 2, QTableWidgetItem("—"))
         t.setItem(n, 3, QTableWidgetItem("< 1e-6 rel"))

@@ -81,7 +81,7 @@ def _smoothness(wr):
 
 def gate_A() -> bool:
     print("=== Gate A: regression ===")
-    print("[A.1] mfof.validate (Phase 2 cone equivalence at 1e-13)")
+    print("[A.1] mfof.validate (Liu 2019 equivalence, mixed wedge/cone)")
     from mfof.validate import run_equivalence_test
     eq_ok = run_equivalence_test(verbose=False)
     print(f"  -> {'PASS' if eq_ok else 'FAIL'}")

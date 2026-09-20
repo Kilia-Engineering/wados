@@ -2,9 +2,11 @@
 
 Structurally identical to ``liu2019.osculating`` (legacy ``tan(delta_c)`` mode)
 but takes a *flowfield factory* -- a callable ``(z, Ma_z) -> BasicFlowfield``
-that decides which basic-flowfield type lives in each osculating plane. For
-Phase 2 the factory always returns a :class:`ConeFlowfield`, so behaviour
-matches Liu 2019 to machine precision.
+that decides which basic-flowfield type lives in each osculating plane.
+Passing the mixed factory in :func:`mfof.validate._build_mfof_equivalent`
+(wedge inboard of ``L_s``, cone outboard) matches Liu 2019 to machine
+precision; an all-cone factory does not, because Liu treats the flat
+region as 2D wedge flow.
 
 Two call sites differ from ``liu2019.osculating``:
 

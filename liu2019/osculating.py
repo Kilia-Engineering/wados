@@ -217,7 +217,11 @@ def osculating_plane_geometry(z_i, coeffs, params, delta_c_deg,
     n_z = float(n_base[2])
 
     if flat:
-        # EXPERIMENT Variant B/C: theta_w in flat region.
+        # Flat region: the shock curve is straight, R_osc -> infinity and
+        # the osculating plane degenerates to 2D wedge flow, so the
+        # streamline descends at theta_w(beta, Ma_local) -- not at the
+        # cone angle delta_c. Falling back to delta_c here is the
+        # "paper's flat-region bug" noted in this function's docstring.
         if Ma_local is not None:
             flat_slope_deg = float(theta_from_beta_Ma(beta_deg, Ma_local, gamma))
         else:
@@ -252,11 +256,18 @@ def osculating_plane_geometry(z_i, coeffs, params, delta_c_deg,
         y_TE = float(stream_3d[-1, 1])
         z_TE = float(stream_3d[-1, 2])
     else:
-        # EXPERIMENT Variant C: theta_w in curved region too.
-        if Ma_local is not None:
-            curved_slope_deg = float(theta_from_beta_Ma(beta_deg, Ma_local, gamma))
-        else:
-            curved_slope_deg = float(delta_c_deg)
+        # Curved region: osculating-cone flow (Rodi 2011). The compression
+        # streamline descends at the Taylor-Maccoll cone half-angle delta_c,
+        # per this module's docstring.
+        #
+        # An earlier revision applied the 2D wedge deflection theta_w here
+        # too ("Variant C"). That was an experiment, not the intended
+        # model: theta_w < delta_c always, so it under-compresses the
+        # whole curved span (which is 80% of the half-span at the paper's
+        # L_s = 0.3 m) and drives volume and base area ~27% below the
+        # paper's Table 4 values. Restoring delta_c here brings every
+        # geometric metric to within 7.6% of the paper (eta to -0.8%).
+        curved_slope_deg = float(delta_c_deg)
         delta_c = np.radians(curved_slope_deg)
         deflection = (L_w - x_LE) * np.tan(delta_c)
         y_TE = y_LE - deflection * n_y
@@ -392,11 +403,13 @@ def build_all_osculating_planes(params, n_z=200, n_x=100):
     planes: List[OsculatingPlaneData] = []
 
     # ------------------------------------------------------------------
-    # Legacy paper-formula streamline model:
+    # Straight-line streamline model (Liu 2019 Section 1.1 Step 4):
     #
-    #   * Flat region   |z| <= L_s   : straight line at angle delta_c
+    #   * Flat region   |z| <= L_s   : straight line at angle theta_w
+    #     (2D wedge flow -- the osculating plane degenerates as
+    #      R_osc -> infinity)
     #   * Curved region |z|  > L_s   : straight line at angle delta_c
-    #     (cone-body-derived approximation, Liu 2019 Section 1.1 Step 4)
+    #     (cone-body-derived approximation, osculating-cone flow)
     #
     # The Taylor-Maccoll velocity-field solver and streamline integrator
     # in shock.py / osculating.py remain available as infrastructure but
