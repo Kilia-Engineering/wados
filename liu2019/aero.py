@@ -334,6 +334,23 @@ def _panel_triangles(X, Y, Z):
     return np.concatenate([tri_a, tri_b], axis=0)
 
 
+def panel_column_index(grid_shape):
+    """Grid column owning each triangle produced by :func:`_panel_triangles`.
+
+    ``_panel_triangles`` walks a structured ``(ni, nj)`` grid row-major over
+    its ``(ni-1, nj-1)`` cells and emits two triangles per cell, all of the
+    first kind before all of the second. Cell ``k`` is therefore row
+    ``k // (nj-1)``, column ``k % (nj-1)``, and the column array simply
+    repeats twice.
+
+    Axis 1 is the spanwise direction for these surfaces, so the column index
+    is what ties a panel back to its osculating plane.
+    """
+    ni, nj = int(grid_shape[0]), int(grid_shape[1])
+    cols = np.tile(np.arange(nj - 1), ni - 1)
+    return np.concatenate([cols, cols])
+
+
 def _tri_areas_centroids_normals(tris, outward_sign):
     """Compute per-triangle area, centroid, outward unit normal.
 
@@ -381,7 +398,10 @@ class Liu2019AeroEvaluator:
                  ref_length: float = REF_LENGTH_M,
                  ref_area: float = REF_AREA_M2,
                  moment_ref=MOMENT_REF,
-                 solver: str = "cone"):
+                 solver: Optional[str] = None):
+        solver_explicit = solver is not None
+        if solver is None:
+            solver = self._default_solver(waverider)
         if solver not in SOLVERS:
             raise ValueError(
                 f"solver must be one of {SOLVERS}, got {solver!r}")
@@ -396,6 +416,15 @@ class Liu2019AeroEvaluator:
         X_l, Y_l, Z_l = waverider.lower_surface(mirror=True)
         self._upper_tris = _panel_triangles(X_u, Y_u, Z_u)
         self._lower_tris = _panel_triangles(X_l, Y_l, Z_l)
+        self._upper_shape = X_u.shape
+        self._lower_shape = X_l.shape
+        # Subclasses may assign a different pressure law per panel -- see
+        # MFOFAeroEvaluator, where a waverider built from a mixed flowfield
+        # factory wants tangent-cone on its conical span and tangent-wedge
+        # on its flat span. ``None`` means "one solver for every panel".
+        # An explicit solver= argument always wins, so it disables this.
+        self._panel_solvers = (
+            None if solver_explicit else self._assign_panel_solvers())
 
     # ------------------------------------------------------------------
     def _evaluate_surface(self, tris, outward_sign, flow_dir, cp_model):
@@ -411,6 +440,37 @@ class Liu2019AeroEvaluator:
         # Non-dim force per panel: dF/q_inf = -Cp * A * n_hat
         forces = -(Cp * areas)[:, None] * normals
         return forces, centroids, Cp, areas
+
+    def _default_solver(self, waverider):
+        """Solver to use when the caller did not name one.
+
+        Base class: tangent-cone, right for a cone-derived waverider.
+        :class:`mfof.aero.MFOFAeroEvaluator` overrides this to follow the
+        flowfield the geometry was actually built with.
+        """
+        return "cone"
+
+    def _assign_panel_solvers(self):
+        """Optional per-panel pressure laws.
+
+        Return ``None`` for a single solver everywhere (the default), or
+        ``(ids_upper, ids_lower, names)`` where the id arrays index into
+        ``names`` and run parallel to ``self._upper_tris`` /
+        ``self._lower_tris``.
+        """
+        return None
+
+    def _cp_model_mixed(self, Ma, ids, names):
+        """``cp_model`` closure that applies a different law per panel group."""
+        models = [self._cp_model(Ma, n) for n in names]
+        def model(sin_delta):
+            out = np.empty(sin_delta.shape, dtype=float)
+            for gid, sub in enumerate(models):
+                mask = (ids == gid)
+                if mask.any():
+                    out[mask] = sub(sin_delta[mask])
+            return out
+        return model
 
     def _cp_model(self, Ma, solver):
         """Return a callable mapping ``sin(delta)`` per panel to ``Cp``."""
@@ -431,6 +491,10 @@ class Liu2019AeroEvaluator:
     def evaluate(self, Ma, alpha_deg=0.0,
                  atm_conditions: Optional[Dict] = None,
                  solver: Optional[str] = None) -> Dict[str, float]:
+        # Naming a solver here means "this law everywhere", even if it
+        # happens to equal self.solver -- so track explicitness rather than
+        # comparing values.
+        solver_named = solver is not None
         solver = self.solver if solver is None else str(solver)
         if solver not in SOLVERS:
             raise ValueError(
@@ -440,12 +504,20 @@ class Liu2019AeroEvaluator:
         lift_dir = np.array([np.sin(alpha),  np.cos(alpha), 0.0])
 
         Cp_max = _cp_max_newtonian(Ma, self.gamma)
-        cp_model = self._cp_model(Ma, solver)
+        # Per-panel laws apply only when the caller let the evaluator choose;
+        # naming a solver explicitly (here or at construction) overrides them.
+        mixed = None if solver_named else self._panel_solvers
+        if mixed is None:
+            cp_upper = cp_lower = self._cp_model(Ma, solver)
+        else:
+            ids_u, ids_l, names = mixed
+            cp_upper = self._cp_model_mixed(Ma, ids_u, names)
+            cp_lower = self._cp_model_mixed(Ma, ids_l, names)
 
         F_u, C_u, _, _ = self._evaluate_surface(
-            self._upper_tris, +1, flow_dir, cp_model)
+            self._upper_tris, +1, flow_dir, cp_upper)
         F_l, C_l, _, _ = self._evaluate_surface(
-            self._lower_tris, -1, flow_dir, cp_model)
+            self._lower_tris, -1, flow_dir, cp_lower)
 
         forces = np.concatenate([F_u, F_l], axis=0)
         centroids = np.concatenate([C_u, C_l], axis=0)
@@ -474,7 +546,8 @@ class Liu2019AeroEvaluator:
             "Cmz": Cmz,
             "Xcp": Xcp,
             "Cp_max": float(Cp_max),
-            "solver": solver,
+            "solver": (solver if mixed is None
+                       else "+".join(sorted(set(mixed[2])))),
         }
 
     # ------------------------------------------------------------------

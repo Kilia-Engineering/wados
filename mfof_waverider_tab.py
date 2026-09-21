@@ -48,7 +48,7 @@ from mfof.cone_flowfield import ConeFlowfield
 from mfof.wedge_flowfield import WedgeFlowfield
 from mfof.power_law_flowfield import PowerLawFlowfield
 from mfof.geometry import build_mfof_waverider
-from mfof.aero import MFOFAeroEvaluator
+from mfof.aero import MFOFAeroEvaluator, solver_for_flowfield
 from mfof.validate import run_equivalence_test
 
 
@@ -262,19 +262,56 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         # ---- Note ----
         note = QLabel(
             "Cone is uniform Taylor-Maccoll (Liu 2019 uses wedge flow "
-            "inboard of L_s). Wedge is shallower. Power-law uses MOC.")
+            "inboard of L_s). Wedge is shallower. Power-law uses MOC. "
+            "The aero pressure law follows the choice automatically.")
         note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; "
                            f"font-style: italic;")
         note.setWordWrap(True)
         grid.addWidget(note, 2, 0, 1, 2)
+
+        # ---- Derived aero solver (read-only) --------------------------
+        # The pressure law is not a separate choice: it follows from the
+        # generating body, so show what the selection implies rather than
+        # letting the two drift apart.
+        grid.addWidget(QLabel("Aero solver:"), 3, 0)
+        self.solver_label = QLabel("—")
+        self.solver_label.setStyleSheet(f"color: {ACCENT};")
+        self.solver_label.setToolTip(
+            "<b>Pressure law used for the aerodynamic evaluation.</b><br><br>"
+            "Derived from the flowfield above, not chosen separately:<br>"
+            "<b>Cone / Power-law</b> &rarr; tangent-cone (Taylor-Maccoll "
+            "surface pressure; exact for a cone, and the right model for "
+            "any axisymmetric body).<br>"
+            "<b>Wedge</b> &rarr; tangent-wedge (2D oblique shock; exact for "
+            "a wedge).<br><br>"
+            "Using wedge theory on a conical span reads about 1.55x the "
+            "correct Cp at Ma 6, so the pairing matters.")
+        grid.addWidget(self.solver_label, 3, 1)
+        self._refresh_solver_label()
         return g
 
+    _SOLVER_LABELS = {
+        "cone":      "tangent-cone (Taylor-Maccoll)",
+        "oblique":   "tangent-wedge (oblique shock)",
+        "newtonian": "modified Newtonian",
+    }
+
+    def _refresh_solver_label(self):
+        """Show the pressure law implied by the current flowfield choice."""
+        if not hasattr(self, "solver_label"):
+            return
+        key = self._current_flowfield_key()
+        solver = solver_for_flowfield(key)
+        self.solver_label.setText(
+            self._SOLVER_LABELS.get(solver, solver))
+
     def _on_flowfield_changed(self, _index: int):
-        """Show/hide the ``n`` spinbox based on the combobox selection."""
+        """Show/hide the ``n`` spinbox and refresh the derived solver label."""
         key = self._current_flowfield_key()
         is_power = (key == "power-law")
         self.n_powerlaw_label.setVisible(is_power)
         self.n_powerlaw_spin.setVisible(is_power)
+        self._refresh_solver_label()
 
     def _current_flowfield_key(self) -> str:
         """Return the internal flowfield key (cone/wedge/power-law) for the
