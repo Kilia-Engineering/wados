@@ -125,13 +125,36 @@ def initial_data_line(x_LE: float, r_LE: float, beta_design_deg: float,
 
     Shock direction in (x, r): ``(+cos beta, -sin beta)``.
 
-    Phase 4 Fix 2: when ``n_body < 0.7`` (concave-up body, steep alpha
-    gradients near the LE *and* near the shock-axis intersection), the
-    point count is auto-boosted to ``max(N, 20/max(n_body, 0.2))`` and
-    spacing switches to Chebyshev clustering ``0.5 (1 - cos(pi t))`` which
-    concentrates points at both ends of the arc. Default ``n_body = 1.0``
-    preserves the legacy uniform spacing exactly, so any caller that
-    omits ``n_body`` is unaffected.
+    Resolution scales continuously with ``1/n_body``: a low-n body is
+    concave-up and has steeper alpha gradients near the LE, so it needs
+    more points along the initial line. The constant is set by convergence
+    at the hardest case (beta = 16 deg, L_s = 0.05, Ma 8-14, n = 0.4),
+    where spanwise trailing-edge curvature falls
+
+        points    50      60      80     100     140
+        max d2y  122.0    27.0    19.7    19.4    13.0
+        volume   2.886   2.902   2.934   2.945   2.948
+
+    i.e. the old ``20/n`` (50 points at n = 0.4) sat on the wrong side of
+    a resolution cliff. ``32/n`` gives 80 points there, which is past the
+    cliff and within 0.5% of the volume at 140.
+
+    An earlier revision ("Phase 4 Fix 2") applied that boost only below
+    ``n_body < 0.7`` and, in the same branch, switched the spacing from
+    uniform to Chebyshev ``0.5 (1 - cos(pi t))``. Two problems:
+
+    * It made the whole model discontinuous in ``n``. At beta = 16 deg,
+      L_s = 0.05, Ma 8-14, crossing n = 0.699 -> 0.700 moved the vehicle
+      volume 3.898 -> 3.442 m^3, an 11.7% step with no physics behind it.
+    * Chebyshev clusters points at *both* ends of the arc. The far end is
+      the shock-axis intersection, where the axisymmetric source terms
+      (both carry 1/r) are singular. Packing points into that region
+      feeds bad data into the mesh while thinning out the middle, where
+      the traced streamline actually runs -- so the branch intended to
+      help low-n bodies was making them rougher, not smoother.
+
+    Spacing is therefore uniform for every ``n``, and the point count is a
+    continuous function of it. ``n_body`` now only sets resolution.
     """
     beta = np.radians(beta_design_deg)
     post = oblique_shock_ratios(Ma_inf, beta_design_deg, gamma)
@@ -141,14 +164,9 @@ def initial_data_line(x_LE: float, r_LE: float, beta_design_deg: float,
     # arc-length along the shock to the axis; stop short to avoid r=0
     xi_max = r_LE / max(np.sin(beta), 1e-6)
 
-    # Adaptive resolution + Chebyshev (both-ends) clustering for low n.
-    if n_body < 0.7:
-        n_actual = max(int(N), int(20.0 / max(float(n_body), 0.2)))
-        t = np.linspace(0.0, 1.0, n_actual)
-        xis_norm = 0.5 * (1.0 - np.cos(np.pi * t))
-    else:
-        n_actual = int(N)
-        xis_norm = np.linspace(0.0, 1.0, n_actual)
+    # Continuous resolution law, uniform spacing at every n.
+    n_actual = int(np.ceil(max(float(N), 32.0 / max(float(n_body), 0.2))))
+    xis_norm = np.linspace(0.0, 1.0, n_actual)
     xis = xis_norm * (0.95 * xi_max)
 
     pts: list[dict] = []
@@ -333,6 +351,7 @@ class MOCGrid:
             if not new_col:
                 break
             self.cols.append(new_col)
+            self._alpha_cache = None      # mesh changed; drop the interpolator
 
     # ------------------------------------------------------------------ #
     #  Utilities                                                          #
@@ -341,25 +360,54 @@ class MOCGrid:
     def all_points(self) -> list[dict]:
         return [p for col in self.cols for p in col]
 
+    def _alpha_interpolator(self):
+        """Build (once) and cache the alpha interpolator over the mesh.
+
+        ``LinearNDInterpolator`` Delaunay-triangulates its input, so
+        constructing one costs far more than evaluating it. This used to be
+        rebuilt on *every* ``interpolate_alpha`` call -- four per RK4 step
+        in :func:`extract_streamline` -- which is why the step count had to
+        be kept tiny to stay affordable, and a tiny step count is what made
+        traced streamlines noisy from plane to plane.
+
+        The mesh is built once by :meth:`march` and read-only afterwards,
+        so the cache is keyed on the point count and cleared by ``march``.
+        """
+        pts = self.all_points()
+        n = len(pts)
+        cached = getattr(self, "_alpha_cache", None)
+        if cached is not None and cached[0] == n:
+            return cached[1], cached[2]
+
+        xs = np.array([p["x"] for p in pts])
+        rs = np.array([p["r"] for p in pts])
+        als = np.array([p["alpha"] for p in pts])
+        interp = None
+        if n >= 3:
+            try:
+                interp = LinearNDInterpolator(
+                    np.column_stack([xs, rs]), als)
+            except Exception:
+                interp = None
+        self._alpha_cache = (n, interp, (xs, rs, als))
+        return interp, (xs, rs, als)
+
     def interpolate_alpha(self, x: float, r: float) -> float:
         """Interpolate flow angle ``alpha(x, r)`` from the mesh."""
         pts = self.all_points()
         if len(pts) < 3:
             return pts[0]["alpha"] if pts else 0.0
 
-        xs = np.array([p["x"] for p in pts])
-        rs = np.array([p["r"] for p in pts])
-        als = np.array([p["alpha"] for p in pts])
+        interp, (xs, rs, als) = self._alpha_interpolator()
+        if interp is not None:
+            try:
+                val = interp([[x, r]])[0]
+                if np.isfinite(val):
+                    return float(val)
+            except Exception:
+                pass
 
-        try:
-            interp = LinearNDInterpolator(np.column_stack([xs, rs]), als)
-            val = interp([[x, r]])[0]
-            if np.isfinite(val):
-                return float(val)
-        except Exception:
-            pass
-
-        # Nearest-neighbour fallback
+        # Nearest-neighbour fallback (query outside the convex hull).
         dist = (xs - x) ** 2 + (rs - r) ** 2
         return float(als[int(np.argmin(dist))])
 

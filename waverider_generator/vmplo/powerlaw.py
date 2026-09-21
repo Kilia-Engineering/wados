@@ -198,9 +198,9 @@ def solve_osculating_plane(Ma_i: float, n_i: float, beta_design_deg: float,
         from waverider_generator.vmplo.moc import (
             MOCGrid, initial_data_line, extract_streamline,
         )
-        # Phase 4 Fix 2: pass the power-law exponent so initial_data_line
-        # can auto-boost the resolution and switch to Chebyshev clustering
-        # when n is low and post-shock alpha gradients are steep.
+        # Pass the power-law exponent so initial_data_line can scale its
+        # resolution with 1/n -- a low-n body has steep post-shock alpha
+        # gradients near the LE. N is only a floor.
         shock_pts = initial_data_line(
             x_LE, r_LE, beta_design_deg, Ma_i, gamma,
             N=n_moc_init, n_body=n_i)

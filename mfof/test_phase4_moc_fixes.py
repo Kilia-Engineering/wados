@@ -23,6 +23,7 @@ Run just one (e.g. before/after a fix)::
     py -3.10 -m mfof.test_phase4_moc_fixes --gate B
     py -3.10 -m mfof.test_phase4_moc_fixes --gate C
     py -3.10 -m mfof.test_phase4_moc_fixes --gate D
+    py -3.10 -m mfof.test_phase4_moc_fixes --gate E
 """
 
 from __future__ import annotations
@@ -182,10 +183,58 @@ def gate_D(verbose: bool = True) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Gate E - continuity of the model in n
+# ---------------------------------------------------------------------------
+
+def gate_E(verbose: bool = True) -> bool:
+    """Volume must vary smoothly with the power-law exponent.
+
+    Guards the defect that produced Gate C's failures: ``initial_data_line``
+    switched resolution *and* spacing law at ``n_body < 0.7``, so the model
+    was discontinuous there. Crossing n = 0.699 -> 0.700 moved the volume
+    3.898 -> 3.442 m^3 (11.7%) with no physics behind it.
+
+    The test is scale-free: the local slope ``|dV/V| / dn`` must stay
+    bounded. Measured, the fixed model runs at 0.52-0.66 across this range;
+    reinstating the old branch trips it to 4.39 at n = 0.700 (and it was
+    117 before the resolution fixes landed alongside). The limit of 2.0
+    sits ~3x above honest curvature and ~2x below the defect, and was
+    checked in both directions rather than assumed.
+    """
+    print("=== Gate E: continuity of volume in n ===")
+    ns = [0.68, 0.69, 0.699, 0.70, 0.701, 0.71]
+    vols = []
+    for n in ns:
+        wr, dt, err = _build(_COMBINED, "power-law", n=n, n_z=60, n_x=30)
+        if wr is None:
+            print(f"  n={n}: BUILD FAILED: {err[:80]}")
+            return False
+        vols.append(float(wr.volume()))
+
+    limit = 2.0
+    all_ok = True
+    if verbose:
+        print(f"  {'n':>7}{'Vol':>10}{'|dV/V|/dn':>12}  status")
+        print("  " + "-" * 40)
+        print(f"  {ns[0]:>7.3f}{vols[0]:>10.4f}{'':>12}")
+    for i in range(1, len(ns)):
+        dn = ns[i] - ns[i - 1]
+        slope = abs(vols[i] - vols[i - 1]) / max(abs(vols[i]), 1e-30) / dn
+        ok = slope < limit
+        all_ok = all_ok and ok
+        if verbose:
+            print(f"  {ns[i]:>7.3f}{vols[i]:>10.4f}{slope:>12.2f}  "
+                  f"{'PASS' if ok else 'FAIL'}")
+    if verbose:
+        print(f"  limit {limit:.1f} per unit n")
+    return all_ok
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
-_GATES = {"A": gate_A, "B": gate_B, "C": gate_C, "D": gate_D}
+_GATES = {"A": gate_A, "B": gate_B, "C": gate_C, "D": gate_D, "E": gate_E}
 
 
 def main(argv=None) -> int:

@@ -39,10 +39,24 @@ from liu2019.shock import (
 from .basic_flowfield import BasicFlowfield, StreamlineResult
 
 
-# Default MOC step counts. Profiling shows r_TE converges by n_steps=10
-# (verified across 10/30/50/100/300 in pre-plan), so we keep this low.
-_DEFAULT_MOC_COLUMNS = 20
-_DEFAULT_RK4_STEPS   = 10
+# Default MOC resolution.
+#
+# These were previously 20 / 10 / 12, chosen when MOCGrid.interpolate_alpha
+# rebuilt its Delaunay interpolator on every call -- four per RK4 step --
+# which made step count ruinously expensive. That interpolator is now cached
+# (same values, ~364x faster), so the mesh can be resolved properly.
+#
+# Convergence at the awkward case (beta = 16 deg, L_s = 0.05, Ma 8-14,
+# n = 0.5), measuring spanwise trailing-edge curvature:
+#
+#   columns   40 and 60 agree exactly; 20 and 30 truncate the march
+#             (volume 3.108 / 3.061 against a converged 3.025)
+#   RK4 steps volume converged by 60; 60/120/240/480 all within 0.1%
+#   initial   inactive here -- the 1/n law in initial_data_line already
+#             asks for 40 points at n = 0.5, so 12 is only a floor for
+#             high-n bodies
+_DEFAULT_MOC_COLUMNS = 40
+_DEFAULT_RK4_STEPS   = 120
 _DEFAULT_INITIAL_PTS = 12
 
 
