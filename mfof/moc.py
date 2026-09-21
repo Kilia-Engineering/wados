@@ -131,6 +131,26 @@ def build_moc_grid(
     return grid, body
 
 
+def mesh_coverage(grid) -> float:
+    """Fraction of the streamwise domain the MOC mesh actually spans.
+
+    ``extract_streamline`` integrates from the LE to ``grid.x_max`` whether
+    or not the mesh reaches that far; beyond the mesh,
+    ``MOCGrid.interpolate_alpha`` falls off its convex hull and silently
+    switches to a nearest-neighbour lookup. A coverage well below 1.0 means
+    most of the traced streamline is extrapolation, not solution.
+
+    Returns ``x_reached / x_max`` in ``[0, 1]``, or ``nan`` for an empty mesh.
+    """
+    pts = [p for col in grid.cols for p in col]
+    if not pts:
+        return float("nan")
+    x_max = float(getattr(grid, "x_max", 0.0))
+    if x_max <= 0.0:
+        return float("nan")
+    return float(max(p["x"] for p in pts) / x_max)
+
+
 def trace_streamline_with_state(
     grid: MOCGrid,
     x_LE: float,
@@ -198,6 +218,7 @@ def trace_streamline_with_state(
 
 __all__ = [
     "MOCGrid",
+    "mesh_coverage",
     "PowerLawBody",
     "build_moc_grid",
     "trace_streamline_with_state",

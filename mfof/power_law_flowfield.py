@@ -22,7 +22,52 @@ have different ``x_LE``). This is intentional and matches how
 
 Diagnostic helpers (per the Phase 2 docstring clarification that subclasses
 MAY add non-abstract methods): :meth:`last_grid` exposes the most recent
-MOC mesh for visualisation in the GUI's Flowfield-diagnostics sub-tab.
+MOC mesh for visualisation in the GUI's Flowfield-diagnostics sub-tab,
+:meth:`last_coverage` how much of the domain that mesh actually spanned,
+and :meth:`body_inside_shock_check` whether the plane was well-posed.
+
+.. warning::
+
+   **Power-law results are numerically smooth but not physically
+   validated.** Two defects were measured and are not yet fixed:
+
+   1. *The MOC solves in the wrong region.* ``initial_data_line`` starts
+      at the body surface and marches toward the axis, so only its first
+      point lies on the body and the rest fall inside the solid. A
+      conical shock must be a ray from the apex (``r/x`` constant); the
+      line it builds has ``r/x`` falling from 0.239 to 0.007 along its
+      length, so it is not a shock in any frame.
+
+      Consequence, measured on a cone (``n = 1``), where conical
+      self-similarity requires every wall point to return the SAME
+      surface Mach: the exact value is 5.8818, and the mesh returns
+      11.6183 at the first wall point decaying to 6.0690 at the last --
+      97.5% error falling to 3.2%.
+
+      Anchoring the initial line on the real shock ray instead
+      (``r = x tan(beta)``, ordered downstream-first) was tried and
+      lifts mesh coverage from 0.245 to 1.000 and cuts the
+      self-similarity spread to 0.91%, with a residual 3.4% bias that
+      five different source-term formulations failed to remove. It is
+      NOT applied here, because of defect 2.
+
+   2. *The body/shock pair is ill-posed over most of the useful range.*
+      See :meth:`body_inside_shock_check`. The feasibility floor
+      ``n > tan(theta_w)/tan(beta)`` evaluates to 0.364 (Ma 6) .. 0.726
+      (Ma 13) at the Liu design point, and 0.644 .. 0.763 across the
+      Gate C parameters -- so at Gate C every swept exponent
+      (n = 0.40 .. 0.70) puts the body outside its own shock over part
+      or all of the span. With no shock layer to mesh, correcting the
+      initial data line has nothing to anchor to.
+
+   Fixing this properly means coupling the body and shock consistently
+   and fitting the shock as part of the solution, rather than
+   prescribing a cone from the apex. That is a redesign of this module,
+   not a patch.
+
+   Until then, treat power-law geometry and aerodynamics as indicative.
+   The Gate B/C smoothness gates constrain spanwise *continuity* only;
+   they say nothing about physical accuracy.
 """
 
 import numpy as np
@@ -94,6 +139,7 @@ class PowerLawFlowfield(BasicFlowfield):
         self._delta_LE_deg = None    # post-shock deflection at LE (= theta from oblique shock)
         self._R_b = None             # body scale; depends on x_LE => set at trace time
         self._last_grid = None       # most recent MOC grid (for diagnostics)
+        self._last_coverage = float("nan")   # mesh coverage of the last trace
         self._last_body = None       # most recent PowerLawBody instance
 
     # ------------------------------------------------------------------
@@ -123,6 +169,49 @@ class PowerLawFlowfield(BasicFlowfield):
         if self.n <= 0.0 or self.n > 2.0:
             return False, f"n = {self.n} out of (0, 2]"
         return True, "ok"
+
+    # ------------------------------------------------------------------
+    def body_inside_shock_check(self) -> tuple:
+        """Is the generating body actually inside its own design shock?
+
+        ``PowerLawBody.from_shock_condition`` sets the body slope at
+        ``x_LE`` to ``theta_w``, which fixes the body radius there at
+
+            r_body(x_LE) = x_LE * tan(theta_w) / n
+
+        while the design shock, taken as a cone from the apex, sits at
+
+            r_shock(x_LE) = x_LE * tan(beta)
+
+        Both scale with ``x_LE``, so the test is a pure ``n`` condition:
+
+            n > tan(theta_w) / tan(beta)
+
+        Below that the body protrudes through its own shock, which is
+        physically impossible -- there is no shock layer left to solve in.
+        Because ``theta_w`` grows with Mach, the threshold rises along a
+        variable-Mach span, so a single ``n`` can be feasible inboard and
+        infeasible outboard.
+
+        Returns ``(is_valid, n_min, message)``.
+
+        NOTE: this is diagnostic only. It is deliberately NOT wired into
+        :meth:`attached_shock_check`, because most of the current
+        power-law parameter range fails it and doing so would block
+        generation outright. See the module docstring for what that means
+        for the trustworthiness of power-law results.
+        """
+        theta_w = self.deflection_angle_deg()
+        n_min = (np.tan(np.radians(theta_w)) /
+                 np.tan(np.radians(self.beta_design_deg)))
+        ok = self.n > n_min
+        if ok:
+            msg = f"ok (n = {self.n:.3f} > n_min = {n_min:.3f})"
+        else:
+            msg = (f"body protrudes through its design shock: n = "
+                   f"{self.n:.3f} <= n_min = {n_min:.3f} at Ma = "
+                   f"{self.Ma_inf:.2f}, beta = {self.beta_design_deg:.2f} deg")
+        return bool(ok), float(n_min), msg
 
     # ------------------------------------------------------------------
     def deflection_angle_deg(self) -> float:
@@ -220,6 +309,7 @@ class PowerLawFlowfield(BasicFlowfield):
             r_arr = float(r_LE) - (x_arr - float(x_LE)) * np.tan(theta_rad)
             self._last_grid = None
             self._last_body = None
+            self._last_coverage = float("nan")
             return StreamlineResult(
                 x_arr=x_arr,
                 r_arr=r_arr,
@@ -241,6 +331,8 @@ class PowerLawFlowfield(BasicFlowfield):
         self._R_b = float(body.R_b)
         self._last_grid = grid
         self._last_body = body
+        from .moc import mesh_coverage
+        self._last_coverage = float(mesh_coverage(grid))
 
         # Trace through the MOC mesh starting AT THE BODY SURFACE
         # (r = body.radius(x_LE_eff)), not at the caller's r_LE. The MOC
@@ -304,6 +396,15 @@ class PowerLawFlowfield(BasicFlowfield):
         """Return the most recent :class:`PowerLawBody` instance, or ``None``.
         """
         return self._last_body
+
+    def last_coverage(self) -> float:
+        """Mesh coverage of the most recent MOC trace (see
+        :func:`mfof.moc.mesh_coverage`). ``nan`` if no MOC ran.
+
+        Values below 1.0 mean the streamline left the mesh and the rest of
+        its path came from nearest-neighbour extrapolation.
+        """
+        return float(self._last_coverage)
 
     def R_b(self) -> float:
         """Latest body scale factor, populated after the first
