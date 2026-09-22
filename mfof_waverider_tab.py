@@ -111,6 +111,14 @@ class _MFOFGeometryWorker(QThread):
             if ftype == "wedge":
                 def factory(z, Ma_z):
                     return WedgeFlowfield(Ma_z, beta, gamma)
+            elif ftype == "cone-tm":
+                # True Taylor-Maccoll streamline: leaves the LE at theta_w
+                # and steepens toward delta_c, so flat and curved planes
+                # join continuously (crease-free like the default, but
+                # physically exact rather than prescriptive; less volume).
+                def factory(z, Ma_z):
+                    return ConeFlowfield(Ma_z, beta, gamma,
+                                         streamline_model="tm")
             elif ftype == "power-law":
                 def factory(z, Ma_z):
                     return PowerLawFlowfield(
@@ -171,6 +179,14 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         self._equivalence_pass: Optional[bool] = None
         self._diag_canvas = None        # populated below
         super().__init__(parent)
+        # Production default: a small flat region. With the uniform-cone
+        # default flowfield, L_s barely affects smoothness (0.87 -> 0.89 mm)
+        # but a small value means nearly every plane is genuinely curved,
+        # so cone flow applies legitimately across the span, and eta ticks
+        # up (0.09787 -> 0.09843 at the paper point). The Liu 2019 tab
+        # keeps the paper's L_s = 0.3 for reference work.
+        if hasattr(self, "Ls_spin"):
+            self.Ls_spin.setValue(0.01)
         # Relabel the 3-D canvas title and info-panel header so MFOF
         # doesn't show the base-class "Liu 2019 Waverider" branding.
         if hasattr(self, "canvas_3d") and self.canvas_3d is not None:
@@ -200,6 +216,7 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
     # Flowfield-combobox value -> internal key
     _FF_COMBO_TO_KEY = {
         "Cone (Taylor-Maccoll)":      "cone",
+        "Cone (true T-M streamline)": "cone-tm",
         "Wedge (2D oblique shock)":   "wedge",
         "Power-law (axisymmetric MOC)": "power-law",
     }
@@ -225,7 +242,12 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
         self.flowfield_combo.setToolTip(
             "<b>Basic flowfield</b> for each osculating plane.<br><br>"
             "<b>Cone (Taylor-Maccoll):</b> Sobieczky 1990 / Liu 2019. "
-            "Streamline is a straight line at angle delta_c.<br>"
+            "Streamline is a straight line at angle delta_c -- the paper's "
+            "construction rule. Highest volume, crease-free.<br>"
+            "<b>Cone (true T-M streamline):</b> the actual streamline of "
+            "the conical field, from theta_w at the LE toward delta_c. "
+            "Physically exact for the osculating model; ~35% less volume "
+            "than the straight-delta_c prescription.<br>"
             "<b>Wedge (2D oblique shock):</b> 2D wedge limit. "
             "Streamline is straight at theta_w &lt; delta_c -- a shallower "
             "compression than the cone.<br>"

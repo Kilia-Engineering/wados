@@ -82,7 +82,12 @@ def run_paper_validation(params: Dict = None,
                          verbose: bool = True,
                          run_aero: bool = True) -> Dict:
     params = dict(params or PAPER_PARAMS)
-    wr = build_liu2019_waverider(params, n_z=n_z, n_x=n_x)
+    # Paper-comparison work uses the "mixed" deflection model explicitly:
+    # it is the closest to Table 4 (7.6% max deviation vs 22.8% for the
+    # production "cone" default). Its z = L_s crease is irrelevant here --
+    # this build is compared, not exported.
+    wr = build_liu2019_waverider(params, n_z=n_z, n_x=n_x,
+                                 deflection_model="mixed")
 
     geom = {
         "Vol_m3":   wr.volume(),

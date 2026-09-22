@@ -369,16 +369,54 @@ def trailing_edge_of_compression(P_LE, delta_c_deg, L_w):
 # Driver
 # ---------------------------------------------------------------------------
 
-def build_all_osculating_planes(params, n_z=200, n_x=100):
+def build_all_osculating_planes(params, n_z=200, n_x=100,
+                                deflection_model="cone"):
     """Sweep z in [0, +W/2] and build OsculatingPlaneData for each station.
 
     Returns an OsculatingPlaneSet covering the starboard half-span; mirror
     the port side at assembly time.
+
+    deflection_model
+    ----------------
+    ``"cone"`` (default)
+        Straight streamline at the Taylor-Maccoll cone half-angle
+        ``delta_c`` in EVERY plane, flat region included. This is the
+        paper's own Section 1.1 Step 4 prescription applied uniformly.
+        Highest volume of the four and crease-free (max spanwise TE
+        second difference ~0.9 mm at the paper point), which is why it is
+        the production default: the surface exports cleanly to CAD.
+        Physically it overstates the descent -- a streamline leaves the
+        shock at ``theta_w``, not ``delta_c`` -- so treat its volume as a
+        design-family value, not a flow-solution value.
+    ``"mixed"``
+        2D wedge deflection ``theta_w`` in the flat region, ``delta_c`` in
+        the curved region. Best agreement with paper Table 4 (7.6% max
+        deviation), but the law switch creases the surface at ``z = L_s``
+        (~331 mm step at the paper point -- 66x the STEP fit tolerance).
+        Kept for paper-comparison work; do not export it to CAD.
+    ``"wedge"``
+        ``theta_w`` everywhere. The pre-2025 production behaviour
+        ("Variant C"); smooth but lowest volume and 27.8% under Table 4.
+    ``"tm"``
+        The true Taylor-Maccoll streamline traced through each plane's
+        conical velocity field. The streamline leaves the LE at
+        ``theta_w`` (shock jump conditions are locally 2D) and steepens
+        toward ``delta_c`` as it penetrates the shock layer, so the wedge
+        limit is recovered CONTINUOUSLY as ``R_osc -> infinity``: this is
+        the crease-free, physically exact form of the osculating model
+        (1.2 mm at the paper point). It is also the least voluminous
+        (Vol -26.8% vs Table 4), because the straight-``delta_c``
+        prescriptions overstate the descent. Use it as the physical
+        reference; the paper's own construction is "mixed"/"cone".
     """
     from .distributions import (
         shock_curve_coefficient,
         upper_surface_coefficients,
     )
+    if deflection_model not in ("cone", "mixed", "wedge", "tm"):
+        raise ValueError(
+            f"deflection_model must be one of 'cone', 'mixed', 'wedge', "
+            f"'tm'; got {deflection_model!r}")
 
     beta_deg  = float(params["beta_deg"])
     L_w       = float(params["L_w"])
@@ -435,19 +473,34 @@ def build_all_osculating_planes(params, n_z=200, n_x=100):
 
     for z in z_stations:
         Ma_local = float(Ma_distribution(z, W, Ma_center, Ma_tip))
-        delta_c  = _interp_cone(Ma_local)
         y_shock  = float(shock_curve(np.array([z]), A, L_s)[0])
         P_shock  = (L_w, y_shock, float(z))
-        # cone_field=None and Ma_local=None => dispatcher uses the legacy
-        # straight-line streamline at angle delta_c in both flat and
-        # curved regions.
+
+        # Dispatch on deflection_model. osculating_plane_geometry's flat
+        # branch uses theta_w when Ma_local is given and slope_deg
+        # otherwise; its curved branch uses slope_deg unless cone_field
+        # is supplied, in which case it traces the true T-M streamline.
+        cone_field = None
+        if deflection_model == "cone":
+            slope_deg, ma_arg = _interp_cone(Ma_local), None
+        elif deflection_model == "wedge":
+            slope_deg = float(theta_from_beta_Ma(beta_deg, Ma_local, gamma))
+            ma_arg = None
+        elif deflection_model == "mixed":
+            slope_deg, ma_arg = _interp_cone(Ma_local), Ma_local
+        else:                                  # "tm"
+            Vr_s, Vt_s, dcr, _beta_rad = taylor_maccoll_cone_field(
+                Ma_local, beta_deg, gamma)
+            slope_deg, ma_arg = float(np.degrees(dcr)), Ma_local
+            cone_field = (Vr_s, Vt_s, dcr)
+
         P_LE, P_TE, n_base, R_osc, stream_3d = osculating_plane_geometry(
-            float(z), coeffs, params, delta_c,
-            Ma_local=Ma_local, cone_field=None,
+            float(z), coeffs, params, slope_deg,
+            Ma_local=ma_arg, cone_field=cone_field,
             n_stream_samples=int(n_x),
         )
         planes.append(OsculatingPlaneData(
-            z=float(z), Ma=Ma_local, delta_c=delta_c, R_osc=float(R_osc),
+            z=float(z), Ma=Ma_local, delta_c=slope_deg, R_osc=float(R_osc),
             n_base=(float(n_base[0]), float(n_base[1]), float(n_base[2])),
             P_shock=P_shock, P_LE=P_LE, P_TE=P_TE, streamline=stream_3d,
         ))

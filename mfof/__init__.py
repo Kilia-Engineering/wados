@@ -9,10 +9,11 @@ signature ``(z, Ma_z) -> BasicFlowfield`` already allows different types to
 coexist in a single waverider; exposing that mixing in the GUI is still to
 come.
 
-With the factory that mirrors Liu's per-plane physics -- ``WedgeFlowfield``
-in the flat region, ``ConeFlowfield`` in the curved region -- ``MFOF``
-reproduces ``liu2019`` numerically to within ``1e-6`` -- see
-:func:`mfof.validate.run_equivalence_test`.
+With the all-cone factory, ``MFOF`` reproduces ``liu2019``'s production
+default (``deflection_model="cone"``) to within ``1e-6`` -- see
+:func:`mfof.validate.run_equivalence_test`. liu2019's "mixed" model
+(wedge inboard of ``L_s``, cone outboard) remains available for
+paper-comparison work and pairs with a mixed Wedge/Cone factory.
 """
 
 from .basic_flowfield import BasicFlowfield, StreamlineResult

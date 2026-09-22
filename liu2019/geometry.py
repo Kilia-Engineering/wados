@@ -479,7 +479,14 @@ class Liu2019Waverider:
 
 # Convenience builder --------------------------------------------------------
 
-def build_liu2019_waverider(params, n_z: int = 200, n_x: int = 100
+def build_liu2019_waverider(params, n_z: int = 200, n_x: int = 100,
+                            deflection_model: str = "cone"
                             ) -> Liu2019Waverider:
-    planes = build_all_osculating_planes(params, n_z=n_z, n_x=n_x)
+    """Build end-to-end. ``deflection_model`` is forwarded to
+    :func:`liu2019.osculating.build_all_osculating_planes`; the default
+    "cone" is the production model (uniform delta_c: highest volume,
+    crease-free CAD export). Pass "mixed" for paper-comparison work and
+    "tm" for the physically exact streamline -- see that docstring."""
+    planes = build_all_osculating_planes(
+        params, n_z=n_z, n_x=n_x, deflection_model=deflection_model)
     return Liu2019Waverider(planes, params, n_x=n_x)

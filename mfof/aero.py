@@ -45,6 +45,7 @@ SOLVER_FOR_FLOWFIELD = {
 # Same mapping keyed by the GUI's flowfield strings.
 SOLVER_FOR_FLOWFIELD_KEY = {
     "cone":      "cone",
+    "cone-tm":   "cone",      # same generating body, different streamline
     "power-law": "cone",
     "wedge":     "oblique",
 }

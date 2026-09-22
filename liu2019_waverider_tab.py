@@ -61,7 +61,13 @@ class _GeometryWorker(QThread):
 
     def run(self):
         try:
-            wr = build_liu2019_waverider(self.params, n_z=self.n_z, n_x=self.n_x)
+            # This tab is the paper-faithful reference (see README), so it
+            # builds the "mixed" model that best matches Liu Table 4. That
+            # model creases at z = L_s (~331 mm) -- for CAD export use the
+            # MFOF tab, whose default (uniform cone) is crease-free.
+            wr = build_liu2019_waverider(self.params, n_z=self.n_z,
+                                         n_x=self.n_x,
+                                         deflection_model="mixed")
             self.finished_ok.emit(wr)
         except Exception as e:
             self.failed.emit(f"{e}\n\n{traceback.format_exc()}")

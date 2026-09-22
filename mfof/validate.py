@@ -7,9 +7,10 @@ deviation. This is the gate condition for Phase 2 acceptance: any drift
 signals that the architectural refactor has introduced a numerical
 regression.
 
-The matching factory is *mixed*, not all-cone: ``liu2019`` uses 2D wedge
-flow in the flat region (``|z| <= L_s``) and osculating-cone flow in the
-curved region. See :func:`_build_mfof_equivalent`.
+The gate pairs the two packages' PRODUCTION defaults: ``liu2019`` builds
+``deflection_model="cone"`` (uniform straight-``delta_c``) and MFOF uses
+the all-cone factory. See :func:`_build_mfof_equivalent` for the history
+of the pairing.
 
 Run from the repo root:
 
@@ -29,39 +30,30 @@ def _build_liu(params, n_z=200, n_x=100):
 
 
 def _build_mfof_equivalent(params, n_z=200, n_x=100):
-    """Build the MFOF waverider that mirrors ``liu2019``'s physics exactly.
+    """Build the MFOF waverider that mirrors ``liu2019``'s default physics.
 
-    ``liu2019.osculating.osculating_plane_geometry`` dispatches per plane:
+    ``liu2019.build_liu2019_waverider`` now defaults to
+    ``deflection_model="cone"``: a straight streamline at the
+    Taylor-Maccoll ``delta_c`` in every plane, flat region included. The
+    matching MFOF factory is therefore simply all-cone -- the original
+    Phase 2 pairing.
 
-    * ``|z| <= L_s`` (flat region, ``R_osc -> infinity``): 2D wedge flow,
-      streamline at ``theta_w(beta, Ma_local)``.
-    * ``|z| >  L_s`` (curved region): osculating-cone flow, streamline at
-      the Taylor-Maccoll half-angle ``delta_c``.
-
-    So the matching MFOF factory is *mixed* -- a ``WedgeFlowfield`` inboard
-    of ``L_s`` and a ``ConeFlowfield`` outboard. This is the framework's
-    first production use of a non-uniform factory, and it is the whole
-    point of MFOF: the flowfield type is a per-plane decision.
-
-    An all-cone factory does **not** reproduce ``liu2019``; it applies
-    ``delta_c`` in the flat region too, which is the "paper's flat-region
-    bug" that ``liu2019.osculating`` documents and deliberately avoids.
+    (History: while ``liu2019`` shipped the "mixed" model -- ``theta_w``
+    in the flat region, ``delta_c`` outboard -- the matching factory was
+    mixed Wedge/Cone. That pairing lives on in liu2019's
+    ``deflection_model="mixed"``, which the paper-comparison path still
+    uses; the equivalence gate tracks the PRODUCTION default.)
     """
     from mfof.cone_flowfield import ConeFlowfield
-    from mfof.wedge_flowfield import WedgeFlowfield
     from mfof.geometry import build_mfof_waverider
 
     beta = float(params["beta_deg"])
     gamma = float(params.get("gamma", 1.4))
-    L_s = float(params["L_s"])
 
-    def liu_equivalent_factory(z, Ma_z):
-        if abs(z) <= L_s:
-            return WedgeFlowfield(Ma_z, beta, gamma)
+    def all_cone_factory(z, Ma_z):
         return ConeFlowfield(Ma_z, beta, gamma)
 
-    return build_mfof_waverider(params, liu_equivalent_factory,
-                                n_z=n_z, n_x=n_x)
+    return build_mfof_waverider(params, all_cone_factory, n_z=n_z, n_x=n_x)
 
 
 def run_equivalence_test(params=None, n_z: int = 200, n_x: int = 100,
@@ -76,7 +68,7 @@ def run_equivalence_test(params=None, n_z: int = 200, n_x: int = 100,
         Mesh resolution. Both packages use the same value.
     tol : float
         Relative-deviation acceptance threshold. Phase 2 spec is 1e-6.
-        The mixed factory reproduces ``liu2019`` to ~1e-13 in practice.
+        The all-cone pairing reproduces ``liu2019`` to ~1e-13 in practice.
     verbose : bool
         If True, print a per-metric table.
 
