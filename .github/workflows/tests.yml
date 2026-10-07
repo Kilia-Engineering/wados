@@ -40,3 +40,6 @@ jobs:
 
       - name: Run PySAGAS test suite
         run: pytest pysagas/tests/ -q
+
+      - name: Run waverider_generator test suite
+        run: pytest waverider_generator/tests/ -q
