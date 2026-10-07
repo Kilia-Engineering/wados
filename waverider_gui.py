@@ -1312,6 +1312,7 @@ class WaveriderGUI(QMainWindow):
             'lecomp_end_station': self.lecomp_end_spin.value(),
             'lecomp_blend_mm': self.lecomp_blend_spin.value(),
             'lecomp_kp': self.lecomp_kp_spin.value(),
+            'lecomp_tip_taper_mm': self.lecomp_taper_spin.value(),
         }
 
     def _set_oc_params_dict(self, d):
@@ -1356,6 +1357,7 @@ class WaveriderGUI(QMainWindow):
         _s(self.lecomp_end_spin, d.get('lecomp_end_station'))
         _s(self.lecomp_blend_spin, d.get('lecomp_blend_mm'))
         _s(self.lecomp_kp_spin, d.get('lecomp_kp'))
+        _s(self.lecomp_taper_spin, d.get('lecomp_tip_taper_mm'))
         _s(self.lecomp_check, d.get('lecomp_enabled'))
 
     def _write_params_to_file(self, path):
@@ -3964,7 +3966,9 @@ class WaveriderGUI(QMainWindow):
         self.info_label.setText("Computing LE fillet compensation (Mode B)...")
         QApplication.processEvents()
         result = self._run_lecomp(us, ls)
-        files = self._write_lecomp_outputs(result, os.path.splitext(filename)[0])
+        # the right-side STEP is mirrored to z <= 0; CSVs follow the exported file
+        side = "right" if sides == "right" else "left"
+        files = self._write_lecomp_outputs(result, os.path.splitext(filename)[0], side)
 
         if not result.all_feasible:
             self.info_label.setText(
@@ -3997,7 +4001,10 @@ class WaveriderGUI(QMainWindow):
             self, "Export successful",
             f"Compensated STEP file exported to:\n{filename}\n\n"
             f"LE fillet compensation (Mode B): {sched}, k_p = {cfg.plateau_factor:g}\n"
-            f"Apply the fillet in CAD on the new sharp edge.\n\n"
+            + (f"Tip taper: R capped over the last {result.tip_taper['length_mm']:.0f} mm of the LE\n"
+               if result.tip_taper.get("length_mm", 0) > 0 else "")
+            + f"Apply the fillet in CAD on the new sharp edge.\n"
+            f"CSV frame: {side} half ({'z <= 0' if side == 'right' else 'z >= 0'}), mm.\n\n"
             "Written:\n" + "\n".join(files))
         self.info_label.setText(f"✓ Compensated STEP file exported to: {filename}")
 
@@ -4083,12 +4090,22 @@ class WaveriderGUI(QMainWindow):
         self.lecomp_kp_spin = dspin(1.0, 10.0, 1.2, dec=2, step=0.05, suffix="")
         grid.addWidget(self.lecomp_kp_spin, 9, 1)
 
+        grid.addWidget(QLabel("Tip taper:"), 10, 0)
+        self.lecomp_taper_spin = dspin(-1.0, 100000.0, -1.0, dec=1, step=10.0)
+        self.lecomp_taper_spin.setSpecialValueText("Auto (min. feasible)")
+        self.lecomp_taper_spin.setToolTip(
+            "Length of LE over which R is capped by a straight ramp to 0 at the\n"
+            "wingtip (the tip has zero chord). Auto picks the shortest taper that\n"
+            "makes every station feasible; 0 disables it (infeasible stations are\n"
+            "then reported and block the export).")
+        grid.addWidget(self.lecomp_taper_spin, 10, 1)
+
         self.lecomp_check_btn = QPushButton("Check Feasibility / Plot")
         self.lecomp_check_btn.setToolTip(
             "Run the compensation on the current waverider and show R, L_B, h_u\n"
             "and theta along the LE plus any infeasible stations. Nothing is exported.")
         self.lecomp_check_btn.clicked.connect(self._lecomp_check)
-        grid.addWidget(self.lecomp_check_btn, 10, 0, 1, 2)
+        grid.addWidget(self.lecomp_check_btn, 11, 0, 1, 2)
 
         group.setLayout(grid)
         self._update_lecomp_enabled()
@@ -4111,6 +4128,7 @@ class WaveriderGUI(QMainWindow):
             w.setEnabled(on and variable)
         self.lecomp_blend_spin.setEnabled(on)
         self.lecomp_kp_spin.setEnabled(on)
+        self.lecomp_taper_spin.setEnabled(on)
         self.lecomp_check_btn.setEnabled(on)
 
     def _lecomp_config(self, upper_streams):
@@ -4130,6 +4148,7 @@ class WaveriderGUI(QMainWindow):
 
         variable = self.lecomp_mode_combo.currentIndex() == 1
         blend = self.lecomp_blend_spin.value()
+        taper = self.lecomp_taper_spin.value()
         return FilletCompensationConfig(
             blunting_enabled=True,
             fillet_mode="variable" if variable else "constant",
@@ -4141,6 +4160,7 @@ class WaveriderGUI(QMainWindow):
             s_end_mm=station_s(self.lecomp_end_spin) if variable else None,
             blend_length_mm=blend if blend > 0 else None,
             plateau_factor=self.lecomp_kp_spin.value(),
+            tip_taper_mm=None if taper < 0 else taper,
             mm_per_unit=1000.0,
         )
 
@@ -4190,14 +4210,15 @@ class WaveriderGUI(QMainWindow):
         self._show_lecomp_report(result, header)
 
     @staticmethod
-    def _write_lecomp_outputs(result, base):
+    def _write_lecomp_outputs(result, base, side="left"):
+        """CSVs (in the frame of the exported half) and the plot next to the STEP."""
         from waverider_generator.le_fillet_compensation import (
             write_station_csv, write_control_points_csv, plot_compensation)
         files = [base + "_lecomp_stations.csv"]
-        write_station_csv(result, files[0])
+        write_station_csv(result, files[0], side=side)
         if result.control_points is not None:
             files.append(base + "_lecomp_control_points.csv")
-            write_control_points_csv(result, files[-1])
+            write_control_points_csv(result, files[-1], side=side)
         files.append(base + "_lecomp.png")
         plot_compensation(result, files[-1])
         return files

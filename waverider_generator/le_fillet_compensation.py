@@ -28,6 +28,15 @@ lower-face setback t_l in the feasibility check.
 Lower grid:  original points untouched; points on the straight segment
 P' → P are prepended.
 
+Tip rule:    the wingtip has zero chord, so any R > 0 there is infeasible.
+Over the last ``tip_taper_mm`` of the LE the radius is capped by a straight
+ramp from the schedule value at the taper start down to 0 at the tip:
+R_applied = min(R_schedule, ramp).  Both are piecewise linear, so the
+applied R(s) is piecewise linear and the control-point table reproduces
+it exactly with linear transitions in CAD.  ``tip_taper_mm=None`` picks
+the shortest taper (starting at an LE station) that makes every station
+feasible; 0 disables the taper and infeasible stations are only reported.
+
 Convention (OC generator): x streamwise, y vertical, z spanwise, half
 model with the symmetry plane at z = 0; streams are lists of (n_j, 3)
 arrays with point 0 on the LE.  Geometry is in metres; all user inputs
@@ -64,6 +73,7 @@ class FilletCompensationConfig:
     s_end_mm: Optional[float] = None       # None -> nose
     blend_length_mm: Optional[float] = None  # None/0 -> 0.30 x local upper chord
     plateau_factor: float = 1.2
+    tip_taper_mm: Optional[float] = None   # None -> auto, 0 -> off, >0 fixed length
     mm_per_unit: float = 1000.0            # geometry is in metres
     # Insert collinear points along the (straight) upper grid lines in the
     # plateau/blend zone before applying the weights.  Off by default: on the
@@ -86,6 +96,8 @@ class FilletCompensationConfig:
             raise ValueError("plateau_factor k_p must be >= 1")
         if self.blend_length_mm is not None and self.blend_length_mm < 0:
             raise ValueError("blend_length must be >= 0 mm (0 = automatic)")
+        if self.tip_taper_mm is not None and self.tip_taper_mm < 0:
+            raise ValueError("tip_taper must be >= 0 mm (0 = off) or None for auto")
         if self.mm_per_unit <= 0:
             raise ValueError("mm_per_unit must be > 0")
 
@@ -107,13 +119,26 @@ def le_arc_length(le):
     return np.concatenate([[0.0], np.cumsum(seg)])
 
 
-def le_tangents(le):
-    """Unit LE tangents: central differences, one-sided at the ends."""
+def le_tangents(le, symmetry_station=None, span_axis=2):
+    """
+    Unit LE tangents: central differences, one-sided at the ends.
+
+    At a symmetry station that is an end point, the missing neighbour is
+    the mirror image of the existing one, so the tangent is exactly
+    spanwise and the compensation translation stays in the symmetry plane
+    by construction.
+    """
     n = len(le)
     e = np.empty_like(le, dtype=float)
     for i in range(n):
         a, b = max(i - 1, 0), min(i + 1, n - 1)
-        e[i] = _unit(le[b] - le[a])
+        if i == symmetry_station and (i == 0 or i == n - 1):
+            nb = le[b] if i == 0 else le[a]
+            mirrored = nb.copy()
+            mirrored[span_axis] = -mirrored[span_axis]
+            e[i] = _unit(nb - mirrored) if i == 0 else _unit(mirrored - nb)
+        else:
+            e[i] = _unit(le[b] - le[a])
     return e
 
 
@@ -185,6 +210,54 @@ def radius_schedule(s_mm, cfg, s_total_mm):
     return R, {"k": k, "s_mm": s_k, "R_mm": R_k}
 
 
+def _schedule_breakpoints(cfg, control, s_total_mm):
+    """Knots (s, R) of the requested piecewise-linear schedule, s ascending."""
+    if control is None:
+        return np.array([0.0, s_total_mm]), np.array([cfg.R_mm, cfg.R_mm], dtype=float)
+    order = np.argsort(control["s_mm"])
+    s_k, R_k = control["s_mm"][order], control["R_mm"][order]
+    # clamped outside [s_a, s_b]: extend flat to the LE ends
+    if s_k[0] > 0.0:
+        s_k, R_k = np.insert(s_k, 0, 0.0), np.insert(R_k, 0, R_k[0])
+    if s_k[-1] < s_total_mm:
+        s_k, R_k = np.append(s_k, s_total_mm), np.append(R_k, R_k[-1])
+    return s_k, R_k
+
+
+def apply_tip_taper(s_mm, cfg, control, taper_mm):
+    """
+    Cap the schedule near the wingtip: R = min(R_schedule, ramp) over the
+    last ``taper_mm`` of the LE, where the ramp falls linearly from the
+    schedule value at the taper start to 0 at the tip.
+
+    Returns (R_applied at s_mm, knots_s, knots_R) with the knots describing
+    the applied piecewise-linear function exactly.
+    """
+    s_mm = np.asarray(s_mm, dtype=float)
+    s_tip = float(s_mm[-1])
+    ks, kR = _schedule_breakpoints(cfg, control, s_tip)
+    sched = lambda x: np.interp(x, ks, kR)
+    if not taper_mm or taper_mm <= 0.0:
+        return sched(s_mm), ks, kR
+    taper_mm = min(float(taper_mm), s_tip)
+    s_c = s_tip - taper_mm
+    R_c = float(sched(s_c))
+    ramp = lambda x: R_c * (s_tip - np.asarray(x, dtype=float)) / taper_mm
+    applied = lambda x: np.where(np.asarray(x) < s_c, sched(x), np.minimum(sched(x), ramp(x)))
+
+    knots = set(float(v) for v in ks[ks <= s_c]) | {s_c, s_tip}
+    inside = [float(v) for v in ks if s_c < v < s_tip]
+    knots |= set(inside)
+    # crossings of the ramp with each schedule segment inside the taper zone
+    seg = sorted(set([s_c] + inside + [s_tip]))
+    for s1, s2 in zip(seg[:-1], seg[1:]):
+        f1, f2 = float(sched(s1) - ramp(s1)), float(sched(s2) - ramp(s2))
+        if f1 * f2 < 0.0:
+            knots.add(s1 + (s2 - s1) * f1 / (f1 - f2))
+    knots_s = np.array(sorted(knots))
+    return applied(s_mm), knots_s, applied(knots_s)
+
+
 def _refine_polyline(stream, targets, min_gap):
     """
     Insert points at arc lengths ``targets`` by linear interpolation along
@@ -216,8 +289,9 @@ class CompensationResult:
     le_original: np.ndarray            # (n, 3) geometry units
     le_new: np.ndarray                 # (n, 3) geometry units, P'
     table: dict                        # per-station arrays (mm / deg / bool)
-    control_points: Optional[dict]     # variable mode only
+    control_points: Optional[dict]     # knots of the applied R(s); None if constant
     messages: List[str] = field(default_factory=list)
+    tip_taper: dict = field(default_factory=dict)   # mode, length_mm, start_s_mm
 
     @property
     def infeasible_stations(self):
@@ -241,6 +315,11 @@ class CompensationResult:
                          f"{t['R_max_mm'][i]:11.3f}  {t['reason'][i]}")
         lines.append("R_max = chord_u sin(phi_u) / (k_p cot(theta/2)), ignoring the blend "
                      "length L_b (phi_u = angle between upper grid line and LE).")
+        tt = self.tip_taper
+        if tt.get("mode") == "off":
+            lines.append("Tip taper is off; set tip_taper to auto or a length to cap R at the tip.")
+        elif tt.get("mode") == "auto-failed":
+            lines.append(tt.get("note", ""))
         return "\n".join(lines)
 
 
@@ -282,7 +361,7 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
 
     le = np.array([s[0] for s in us])
     s_le = le_arc_length(le)
-    e_all = le_tangents(le)
+    e_all = le_tangents(le, symmetry_station, span_axis)
     scale = max(s_le[-1], 1e-30)
 
     le_gap = max(np.linalg.norm(us[i][0] - ls[i][0]) for i in range(n))
@@ -341,11 +420,71 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
 
     # --- radius schedule --------------------------------------------------
     s_mm = s_le * mm
-    R_mm, control = radius_schedule(s_mm, cfg, s_mm[-1])
+    R_req_mm, control = radius_schedule(s_mm, cfg, s_mm[-1])
+    cot_half = c_half / s_half
+    if cfg.blend_length_mm:
+        L_b = np.full(n, cfg.blend_length_mm / mm)
+    else:
+        L_b = 0.30 * chord_u
+
+    def feasibility(R):
+        """Per-station feasibility for radii R (geometry units)."""
+        ok = np.ones(n, dtype=bool)
+        why = [""] * n
+        xi_p_ = cfg.plateau_factor * R * cot_half / sin_phi_u
+        t_l_ = R / sin_phi_l
+        for i in range(n):
+            if R[i] == 0.0:
+                continue
+            r = []
+            if degenerate[i]:
+                r.append("zero chord")
+            else:
+                if xi_p_[i] + L_b[i] > chord_u[i]:
+                    r.append("xi_p + L_b > upper chord")
+                if t_l_[i] > chord_l[i]:
+                    r.append("t_l = R > lower chord")
+            if r:
+                ok[i] = False
+                why[i] = "; ".join(r)
+        return ok, why
+
+    # --- tip taper ----------------------------------------------------------
+    s_tip = float(s_mm[-1])
+    tip_taper = {"mode": "off", "length_mm": 0.0, "start_s_mm": s_tip}
+    if cfg.tip_taper_mm is None:
+        # shortest taper starting at an LE station that makes every station feasible
+        chosen = None
+        for j in range(n - 2, -1, -1):
+            length = s_tip - float(s_mm[j])
+            if length > 0.5 * s_tip:
+                break
+            R_try, _, _ = apply_tip_taper(s_mm, cfg, control, length)
+            if feasibility(R_try / mm)[0].all():
+                chosen = (j, length)
+                break
+        if chosen is None:
+            tip_taper = {"mode": "auto-failed", "length_mm": 0.0, "start_s_mm": s_tip,
+                         "note": "auto tip taper: no taper of up to 50% of the LE makes "
+                                 "all stations feasible; no taper applied"}
+            messages.append(tip_taper["note"])
+        else:
+            tip_taper = {"mode": "auto", "length_mm": chosen[1],
+                         "start_s_mm": s_tip - chosen[1], "start_station": chosen[0]}
+            messages.append(f"auto tip taper: R capped over the last {chosen[1]:.1f} mm "
+                            f"of the LE (from station {chosen[0]}, s = {s_tip - chosen[1]:.1f} mm)")
+    elif cfg.tip_taper_mm > 0:
+        length = min(float(cfg.tip_taper_mm), s_tip)
+        tip_taper = {"mode": "fixed", "length_mm": length, "start_s_mm": s_tip - length}
+        messages.append(f"tip taper: R capped over the last {length:.1f} mm of the LE")
+    R_mm, knots_s, knots_R = apply_tip_taper(s_mm, cfg, control, tip_taper["length_mm"])
     R = R_mm / mm
+    if tip_taper["length_mm"] > 0 or control is not None:
+        sched_s, sched_R = _schedule_breakpoints(cfg, control, s_tip)
+        control = {"k": np.arange(len(knots_s)), "s_mm": knots_s, "R_mm": knots_R,
+                   "R_schedule_mm": np.interp(knots_s, sched_s, sched_R)}
 
     # --- Mode B per station ----------------------------------------------
-    cot_half = c_half / s_half
     L_B = R * (cot_half - 1.0)
     delta = L_B[:, None] * a_l
     sym_mismatch = np.zeros(n)
@@ -363,37 +502,15 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
     h_u = np.einsum("ij,ij->i", delta, n_u)
     h_u_formula = R * (1.0 + np.cos(theta) - np.sin(theta))
     for i in range(n):
-        if i == symmetry_station:
-            continue
         if abs(h_u[i] - h_u_formula[i]) > 1e-9 * max(R[i], 1e-30) + 1e-15 * scale:
             raise AssertionError(f"station {i}: h_u check failed "
                                  f"({h_u[i]} vs {h_u_formula[i]})")
     t_u = R * cot_half
     t_l = R.copy()
     xi_p = cfg.plateau_factor * t_u / sin_phi_u      # along the upper grid line
-    t_l_grid = t_l / sin_phi_l                         # along the lower grid line
-    if cfg.blend_length_mm:
-        L_b = np.full(n, cfg.blend_length_mm / mm)
-    else:
-        L_b = 0.30 * chord_u
 
     # --- feasibility ------------------------------------------------------
-    feasible = np.ones(n, dtype=bool)
-    reason = [""] * n
-    for i in range(n):
-        if R[i] == 0.0:
-            continue
-        why = []
-        if degenerate[i]:
-            why.append("zero chord")
-        else:
-            if xi_p[i] + L_b[i] > chord_u[i]:
-                why.append("xi_p + L_b > upper chord")
-            if t_l_grid[i] > chord_l[i]:
-                why.append("t_l = R > lower chord")
-        if why:
-            feasible[i] = False
-            reason[i] = "; ".join(why)
+    feasible, reason = feasibility(R)
     R_max = np.where(degenerate, 0.0,
                      chord_u * sin_phi_u / (cfg.plateau_factor * cot_half))
 
@@ -440,6 +557,7 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
         "x": P_new[:, 0] * mm, "y": P_new[:, 1] * mm, "z": P_new[:, 2] * mm,
         "theta_deg": np.degrees(theta),
         "R_mm": R_mm,
+        "R_requested_mm": R_req_mm,
         "L_B_mm": L_B * mm,
         "h_u_mm": h_u * mm,
         "t_u_mm": t_u * mm,
@@ -473,7 +591,8 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
     for msg in messages:
         logger.info("[LE comp] %s", msg)
 
-    return CompensationResult(cfg, new_us, new_ls, le, P_new, table, control, messages)
+    return CompensationResult(cfg, new_us, new_ls, le, P_new, table, control,
+                              messages, tip_taper)
 
 
 # ---------------------------------------------------------------------------
@@ -481,35 +600,54 @@ def compensate_le_mode_b(upper_streams, lower_streams, cfg,
 # ---------------------------------------------------------------------------
 
 STATION_COLUMNS = ["station", "s_mm", "x", "y", "z", "theta_deg", "R_mm",
-                   "L_B_mm", "h_u_mm", "t_u_mm", "feasible"]
+                   "L_B_mm", "h_u_mm", "t_u_mm", "feasible", "R_requested_mm", "side"]
+CONTROL_COLUMNS = ["k", "s_mm", "s_new_edge_mm", "x", "y", "z", "R_mm",
+                   "R_schedule_mm", "side"]
 
 
-def write_station_csv(result, path):
-    """Per-station table for CAD entry; x, y, z are P' in mm (half model)."""
+def _side_sign(side):
+    if side not in ("left", "right"):
+        raise ValueError("side must be 'left' (z >= 0) or 'right' (z <= 0)")
+    return -1.0 if side == "right" else 1.0
+
+
+def write_station_csv(result, path, side="left"):
+    """
+    Per-station table for CAD entry; x, y, z are P' in mm.  ``side`` selects
+    the half the coordinates describe: 'left' keeps z >= 0, 'right' mirrors
+    z to match the right-side STEP export.
+    """
     t = result.table
+    sz = _side_sign(side)
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(STATION_COLUMNS)
         for i in t["station"]:
-            w.writerow([int(i)] + [f"{t[c][i]:.6f}" for c in STATION_COLUMNS[1:-1]]
-                       + [bool(t["feasible"][i])])
+            vals = {c: t[c][i] for c in STATION_COLUMNS if c in t}
+            vals["z"] = sz * vals["z"]
+            w.writerow([int(i)]
+                       + [f"{vals[c]:.6f}" for c in STATION_COLUMNS[1:10]]
+                       + [bool(t["feasible"][i]), f"{t['R_requested_mm'][i]:.6f}", side])
 
 
-def write_control_points_csv(result, path):
+def write_control_points_csv(result, path, side="left"):
     """
-    Variable-fillet control points: s_k on the original LE, arc length of the
-    same point along the new edge, its 3D position on the new edge (mm), R_k.
+    Knots of the applied piecewise-linear R(s): s_k on the original LE, arc
+    length of the same point along the new edge, its 3D position on the new
+    edge (mm), R_k to enter in CAD, and the uncapped schedule value.
     """
     cp = result.control_points
     if cp is None:
-        raise ValueError("control points exist only in variable fillet mode")
+        raise ValueError("no control points: constant radius without tip taper")
+    sz = _side_sign(side)
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["k", "s_mm", "s_new_edge_mm", "x", "y", "z", "R_mm"])
+        w.writerow(CONTROL_COLUMNS)
         for k in range(len(cp["k"])):
             x, y, z = cp["xyz_mm"][k]
             w.writerow([int(cp["k"][k])] + [f"{v:.6f}" for v in
-                       (cp["s_mm"][k], cp["s_new_mm"][k], x, y, z, cp["R_mm"][k])])
+                       (cp["s_mm"][k], cp["s_new_mm"][k], x, y, sz * z,
+                        cp["R_mm"][k], cp["R_schedule_mm"][k])] + [side])
 
 
 def compensated_copy(waverider, result):
@@ -553,9 +691,16 @@ def plot_compensation(result, path=None, title=None):
     fig.subplots_adjust(left=left, right=right, top=0.91, bottom=0.06, hspace=0.12)
     axes = fig.subplots(len(panels), 1, sharex=True)
 
+    tapered = result.tip_taper.get("length_mm", 0.0) > 0
     for ax, (key, label) in zip(axes, panels):
         ax.set_facecolor(_SURFACE)
-        ax.plot(s, t[key], color=_SERIES, lw=2, marker="o", ms=4, zorder=3)
+        if key == "R_mm" and tapered:
+            ax.plot(s, t["R_requested_mm"], color=_INK_2, lw=2, ls="--", zorder=2,
+                    label="requested R(s)")
+            ax.plot(s, t[key], color=_SERIES, lw=2, marker="o", ms=4, zorder=3,
+                    label="applied R(s), tip taper")
+        else:
+            ax.plot(s, t[key], color=_SERIES, lw=2, marker="o", ms=4, zorder=3)
         if bad.any():
             ax.plot(s[bad], t[key][bad], ls="none", marker="x", ms=10, mew=2.5,
                     color=_CRITICAL, zorder=4, label="infeasible station")
@@ -572,7 +717,7 @@ def plot_compensation(result, path=None, title=None):
         axes[0].plot(cp["s_mm"], cp["R_mm"], ls="none", marker="s", ms=10,
                      mfc="none", mew=2, color=_INK, zorder=5,
                      label="control points $(s_k, R_k)$")
-    if bad.any() or cp is not None:
+    if bad.any() or cp is not None or tapered:
         axes[0].legend(fontsize=14, frameon=False, loc="best")
 
     axes[-1].set_xlabel("LE arc length s from nose [mm]", fontsize=18, color=_INK)

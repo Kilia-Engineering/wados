@@ -8,7 +8,8 @@ import pytest
 from waverider_generator.le_fillet_compensation import (
     FilletCompensationConfig, compensate_le_mode_b, radius_schedule,
     smoothstep_weight, wedge_angle, write_station_csv,
-    write_control_points_csv, plot_compensation, STATION_COLUMNS)
+    write_control_points_csv, plot_compensation, apply_tip_taper,
+    le_tangents, STATION_COLUMNS, CONTROL_COLUMNS)
 
 
 def _unit(v):
@@ -58,8 +59,9 @@ def swept_wedge(theta_n_deg, sweep_deg, chord=200.0, n_j=61, n_i=5, dz=1.0):
 
 
 def _unit_cfg(**kw):
-    """Config in geometry units (mm_per_unit = 1)."""
+    """Config in geometry units (mm_per_unit = 1), tip taper off."""
     kw.setdefault("mm_per_unit", 1.0)
+    kw.setdefault("tip_taper_mm", 0.0)
     return FilletCompensationConfig(blunting_enabled=True, **kw)
 
 
@@ -218,10 +220,11 @@ def oc_default():
 
 
 @pytest.mark.parametrize("cfg", [
-    FilletCompensationConfig(blunting_enabled=True, R_mm=5.0),
-    FilletCompensationConfig(blunting_enabled=True, R_mm=5.0, refine_upper=True),
+    FilletCompensationConfig(blunting_enabled=True, R_mm=5.0, tip_taper_mm=0.0),
+    FilletCompensationConfig(blunting_enabled=True, R_mm=5.0, refine_upper=True,
+                             tip_taper_mm=0.0),
     FilletCompensationConfig(blunting_enabled=True, fillet_mode="variable",
-                             R_start_mm=20.0, R_end_mm=5.0, N_steps=5),
+                             R_start_mm=20.0, R_end_mm=5.0, N_steps=5, tip_taper_mm=0.0),
 ], ids=["constant", "constant-refined", "variable"])
 def test_real_oc_waverider(oc_default, cfg):
     us = oc_default.upper_surface_streams
@@ -251,10 +254,13 @@ def test_real_oc_waverider(oc_default, cfg):
         for p in up[far]:
             assert np.any(np.all(us[i] == p, axis=1))
 
-    # nose stays on the symmetry plane
+    # nose stays on the symmetry plane: the mirrored tangent makes Delta
+    # in-plane by construction, so nothing had to be projected away
     assert res.le_new[0, 2] == 0.0
     assert np.all(res.upper_streams[0][:, 2] == 0.0)
     assert np.all(res.lower_streams[0][:, 2] == 0.0)
+    assert t["sym_mismatch_mm"][0] == 0.0
+    assert abs(t["e"][0, 0]) == 0.0 and abs(t["e"][0, 1]) == 0.0
 
     # the zero-chord wingtip is reported, not clamped
     assert bool(t["degenerate"][-1]) and not bool(t["feasible"][-1])
@@ -266,20 +272,65 @@ def test_real_oc_waverider(oc_default, cfg):
     assert np.all((t["theta_deg"] > 1.0) & (t["theta_deg"] < 30.0))
 
 
+@pytest.mark.parametrize("cfg", [
+    FilletCompensationConfig(blunting_enabled=True, R_mm=5.0),
+    FilletCompensationConfig(blunting_enabled=True, fillet_mode="variable",
+                             R_start_mm=20.0, R_end_mm=5.0, N_steps=5),
+], ids=["constant", "variable"])
+def test_real_oc_auto_tip_taper(oc_default, cfg):
+    """Default (auto) taper: every station feasible, R = 0 at the tip, the
+    requested schedule untouched inboard of the taper, and the control
+    points reproduce the applied R(s) exactly with linear transitions."""
+    res = compensate_le_mode_b(oc_default.upper_surface_streams,
+                               oc_default.lower_surface_streams, cfg)
+    t, tt, cp = res.table, res.tip_taper, res.control_points
+    n = len(t["station"])
+
+    assert res.all_feasible
+    assert tt["mode"] == "auto" and 0 < tt["length_mm"] < 0.5 * t["s_mm"][-1]
+    assert t["R_mm"][-1] == 0.0
+    inboard = t["s_mm"] <= tt["start_s_mm"]
+    assert inboard.sum() >= n // 2
+    assert np.array_equal(t["R_mm"][inboard], t["R_requested_mm"][inboard])
+    assert np.all(t["R_mm"] <= t["R_requested_mm"] + 1e-12)
+    assert np.allclose(np.interp(t["s_mm"], cp["s_mm"], cp["R_mm"]), t["R_mm"], atol=1e-9)
+    assert cp["R_mm"][-1] == 0.0 and cp["s_mm"][-1] == t["s_mm"][-1]
+    # the tip itself does not move, so the new edge still ends at the wingtip
+    assert np.array_equal(res.le_new[-1], res.le_original[-1])
+
+    # one station shorter would not have been enough
+    j = tt["start_station"]
+    shorter = FilletCompensationConfig(**{**cfg.__dict__, "tip_taper_mm": t["s_mm"][-1] - t["s_mm"][j + 1]})
+    res2 = compensate_le_mode_b(oc_default.upper_surface_streams,
+                                oc_default.lower_surface_streams, shorter)
+    assert not res2.all_feasible
+
+
 def test_real_oc_outputs(oc_default, tmp_path):
     cfg = FilletCompensationConfig(blunting_enabled=True, fillet_mode="variable",
                                    R_start_mm=20.0, R_end_mm=5.0, N_steps=5)
     res = compensate_le_mode_b(oc_default.upper_surface_streams,
                                oc_default.lower_surface_streams, cfg)
     write_station_csv(res, tmp_path / "st.csv")
+    write_station_csv(res, tmp_path / "st_right.csv", side="right")
     write_control_points_csv(res, tmp_path / "cp.csv")
+    write_control_points_csv(res, tmp_path / "cp_right.csv", side="right")
     plot_compensation(res, tmp_path / "plot.png")
 
     lines = (tmp_path / "st.csv").read_text().splitlines()
     assert lines[0].split(",") == STATION_COLUMNS
     assert len(lines) == 1 + len(oc_default.upper_surface_streams)
+    right = (tmp_path / "st_right.csv").read_text().splitlines()
+    iz = STATION_COLUMNS.index("z")
+    for a, b in zip(lines[1:], right[1:]):
+        fa, fb = a.split(","), b.split(",")
+        assert float(fb[iz]) == pytest.approx(-float(fa[iz]), abs=1e-9)
+        assert fa[-1] == "left" and fb[-1] == "right"
+        assert fa[:iz] == fb[:iz] and fa[iz + 1:-1] == fb[iz + 1:-1]
     cp = (tmp_path / "cp.csv").read_text().splitlines()
-    assert len(cp) == 1 + 6
+    assert cp[0].split(",") == CONTROL_COLUMNS
+    assert len(cp) == 1 + len(res.control_points["k"])
+    assert len(res.control_points["k"]) >= 6 + 1       # schedule knots + taper start
     assert (tmp_path / "plot.png").stat().st_size > 10_000
 
 
@@ -316,9 +367,54 @@ def test_variable_schedule_on_geometry_control_points():
     cfg = _unit_cfg(fillet_mode="variable", R_start_mm=20.0, R_end_mm=5.0, N_steps=5)
     res = compensate_le_mode_b(upper, lower, cfg, symmetry_station=None)
     cp = res.control_points
-    assert np.allclose(cp["R_mm"], [20, 17, 14, 11, 8, 5], atol=1e-12)
+    # rows are ordered by ascending s (nose -> wingtip), the schedule runs wingtip -> nose
+    assert np.allclose(cp["R_mm"][::-1], [20, 17, 14, 11, 8, 5], atol=1e-12)
+    assert np.allclose(cp["R_schedule_mm"], cp["R_mm"])
     assert np.allclose(np.diff(cp["s_mm"]), np.diff(cp["s_mm"])[0], atol=1e-9)
     # control points sit on the new edge (straight here)
     d = _unit(res.le_new[-1] - res.le_new[0])
     rel = cp["xyz_mm"] - res.le_new[0]
     assert np.allclose(rel - np.outer(rel @ d, d), 0.0, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# 5. Tip taper and nose tangent
+# ---------------------------------------------------------------------------
+
+def test_tip_taper_is_piecewise_linear_cap():
+    cfg = FilletCompensationConfig(fillet_mode="variable", R_start_mm=20.0,
+                                   R_end_mm=5.0, N_steps=5)
+    s_total = 3000.0
+    s = np.linspace(0.0, s_total, 301)
+    _, control = radius_schedule(s, cfg, s_total)
+    R, ks, kR = apply_tip_taper(s, cfg, control, 1000.0)
+
+    # untouched inboard of the taper start, 0 at the tip, never above the schedule
+    sched = np.interp(s, *apply_tip_taper(s, cfg, control, 0.0)[1:])
+    assert np.array_equal(R[s <= 2000.0], sched[s <= 2000.0])
+    assert R[-1] == 0.0
+    assert np.all(R <= sched + 1e-12)
+    # the ramp starts at the schedule value and the cap is active right after
+    assert R[s == 2000.0][0] == pytest.approx(sched[s == 2000.0][0])
+    assert R[s == 2500.0][0] == pytest.approx(min(sched[s == 2500.0][0], 0.5 * sched[s == 2000.0][0]))
+    # knots reproduce the applied function exactly
+    assert np.allclose(np.interp(s, ks, kR), R, atol=1e-12)
+    assert 2000.0 in ks and s_total in ks
+
+
+def test_tip_taper_constant_mode():
+    cfg = FilletCompensationConfig(R_mm=5.0)
+    s = np.linspace(0.0, 1000.0, 11)
+    R, ks, kR = apply_tip_taper(s, cfg, None, 300.0)
+    assert np.allclose(R[s <= 700.0], 5.0)
+    assert np.allclose(R[s >= 700.0], 5.0 * (1000.0 - s[s >= 700.0]) / 300.0)
+    assert list(ks) == [0.0, 700.0, 1000.0] and list(kR) == [5.0, 5.0, 0.0]
+
+
+def test_symmetry_tangent_is_exactly_spanwise():
+    le = np.array([[0.0, 0.0, 0.0], [0.05, -0.01, 1.0], [0.3, -0.05, 2.0]])
+    e = le_tangents(le, symmetry_station=0, span_axis=2)
+    assert np.array_equal(e[0], [0.0, 0.0, 1.0])
+    assert np.allclose(e[1], (le[2] - le[0]) / np.linalg.norm(le[2] - le[0]))
+    # without the symmetry hint the one-sided difference leans streamwise
+    assert le_tangents(le)[0][0] > 0.0
