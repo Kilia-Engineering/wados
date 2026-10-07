@@ -1302,6 +1302,16 @@ class WaveriderGUI(QMainWindow):
             'blunting_sweep': self.blunting_sweep_combo.currentText(),
             'min_thickness_enabled': self.min_thickness_check.isChecked(),
             'min_thickness_pct': self.min_thickness_spin.value(),
+            'lecomp_enabled': self.lecomp_check.isChecked(),
+            'lecomp_mode': self.lecomp_mode_combo.currentText(),
+            'lecomp_R_mm': self.lecomp_R_spin.value(),
+            'lecomp_R_start_mm': self.lecomp_Rstart_spin.value(),
+            'lecomp_R_end_mm': self.lecomp_Rend_spin.value(),
+            'lecomp_N_steps': self.lecomp_nsteps_spin.value(),
+            'lecomp_start_station': self.lecomp_start_spin.value(),
+            'lecomp_end_station': self.lecomp_end_spin.value(),
+            'lecomp_blend_mm': self.lecomp_blend_spin.value(),
+            'lecomp_kp': self.lecomp_kp_spin.value(),
         }
 
     def _set_oc_params_dict(self, d):
@@ -1337,6 +1347,16 @@ class WaveriderGUI(QMainWindow):
         _s(self.blunting_sweep_combo, d.get('blunting_sweep'))
         _s(self.min_thickness_check, d.get('min_thickness_enabled'))
         _s(self.min_thickness_spin, d.get('min_thickness_pct'))
+        _s(self.lecomp_mode_combo, d.get('lecomp_mode'))
+        _s(self.lecomp_R_spin, d.get('lecomp_R_mm'))
+        _s(self.lecomp_Rstart_spin, d.get('lecomp_R_start_mm'))
+        _s(self.lecomp_Rend_spin, d.get('lecomp_R_end_mm'))
+        _s(self.lecomp_nsteps_spin, d.get('lecomp_N_steps'))
+        _s(self.lecomp_start_spin, d.get('lecomp_start_station'))
+        _s(self.lecomp_end_spin, d.get('lecomp_end_station'))
+        _s(self.lecomp_blend_spin, d.get('lecomp_blend_mm'))
+        _s(self.lecomp_kp_spin, d.get('lecomp_kp'))
+        _s(self.lecomp_check, d.get('lecomp_enabled'))
 
     def _write_params_to_file(self, path):
         """Write all parameters (both tabs) to a JSON file."""
@@ -2407,6 +2427,9 @@ class WaveriderGUI(QMainWindow):
 
         blunt_group.setLayout(blunt_layout)
         layout.addWidget(blunt_group)
+
+        # LE fillet compensation (Mode B) group
+        layout.addWidget(self._create_lecomp_group())
 
         # Minimum nose thickness group
         thick_group = QGroupBox("Minimum Nose Thickness")
@@ -3883,6 +3906,10 @@ class WaveriderGUI(QMainWindow):
                 pct = self.min_thickness_spin.value()
                 min_thickness = self.waverider.length * pct / 100.0
 
+            if self.lecomp_check.isChecked():
+                self._export_cad_lecomp(filename, sides, min_thickness)
+                return
+
             # STEP files use millimeters (OCCT convention);
             # geometry is in meters → scale by 1000
             to_CAD(
@@ -3924,13 +3951,263 @@ class WaveriderGUI(QMainWindow):
             )
             self.info_label.setText(f"Export error: {str(e)}")
 
+    def _export_cad_lecomp(self, filename, sides, min_thickness):
+        """STEP export of the Mode B pre-compensated geometry (sharp LE)."""
+        from waverider_generator.le_fillet_compensation import compensated_copy
+
+        us = self.waverider.upper_surface_streams
+        ls = self.waverider.lower_surface_streams
+        if min_thickness > 0:
+            from waverider_generator.cad_export import _enforce_min_thickness
+            us, ls = _enforce_min_thickness(us, ls, min_thickness)
+
+        self.info_label.setText("Computing LE fillet compensation (Mode B)...")
+        QApplication.processEvents()
+        result = self._run_lecomp(us, ls)
+        files = self._write_lecomp_outputs(result, os.path.splitext(filename)[0])
+
+        if not result.all_feasible:
+            self.info_label.setText(
+                f"STEP export blocked: {len(result.infeasible_stations)} infeasible "
+                f"LE station(s). See report.")
+            self._show_lecomp_report(
+                result, "STEP NOT EXPORTED - infeasible stations (no clamping applied).",
+                files)
+            return
+
+        self.info_label.setText("Exporting compensated STEP file...")
+        QApplication.processEvents()
+        # min thickness was applied before compensation; no blunting on top
+        to_CAD(
+            waverider=compensated_copy(self.waverider, result),
+            sides=sides,
+            export=True,
+            filename=filename,
+            scale=1000.0,
+            blunting_radius=0.0,
+            blunting_method="auto",
+            min_thickness=0.0,
+            sweep_scaled=False,
+        )
+
+        cfg = result.config
+        sched = (f"R = {cfg.R_mm:g} mm" if cfg.fillet_mode == "constant" else
+                 f"R {cfg.R_start_mm:g} -> {cfg.R_end_mm:g} mm in {cfg.N_steps} steps")
+        QMessageBox.information(
+            self, "Export successful",
+            f"Compensated STEP file exported to:\n{filename}\n\n"
+            f"LE fillet compensation (Mode B): {sched}, k_p = {cfg.plateau_factor:g}\n"
+            f"Apply the fillet in CAD on the new sharp edge.\n\n"
+            "Written:\n" + "\n".join(files))
+        self.info_label.setText(f"✓ Compensated STEP file exported to: {filename}")
+
     def _on_min_thickness_toggled(self, state):
         """Enable/disable min thickness spinner based on checkbox."""
         self.min_thickness_spin.setEnabled(bool(state))
 
+    # ------------------------------------------------------------------
+    #  LE fillet compensation (Mode B)
+    # ------------------------------------------------------------------
+
+    def _create_lecomp_group(self):
+        """Controls for pre-compensating the sharp LE for a CAD fillet."""
+        group = QGroupBox("LE Fillet Compensation (Mode B)")
+        grid = QGridLayout()
+
+        self.lecomp_check = QCheckBox("Pre-compensate for CAD fillet")
+        self.lecomp_check.setToolTip(
+            "Export a sharp geometry that, after a rolling-ball fillet of\n"
+            "radius R in CAD, lands back on the original sharp LE.\n"
+            "Lower surface preserved; upper surface offset outward.\n"
+            "Writes per-station and control-point CSVs and a plot next to the STEP.")
+        self.lecomp_check.stateChanged.connect(self._on_lecomp_toggled)
+        grid.addWidget(self.lecomp_check, 0, 0, 1, 2)
+
+        def dspin(lo, hi, val, dec=3, step=1.0, suffix=" mm"):
+            w = QDoubleSpinBox()
+            w.setRange(lo, hi)
+            w.setDecimals(dec)
+            w.setSingleStep(step)
+            w.setValue(val)
+            w.setSuffix(suffix)
+            return w
+
+        grid.addWidget(QLabel("Fillet mode:"), 1, 0)
+        self.lecomp_mode_combo = QComboBox()
+        self.lecomp_mode_combo.addItems(["Constant", "Variable"])
+        self.lecomp_mode_combo.currentIndexChanged.connect(self._update_lecomp_enabled)
+        grid.addWidget(self.lecomp_mode_combo, 1, 1)
+
+        grid.addWidget(QLabel("R:"), 2, 0)
+        self.lecomp_R_spin = dspin(0.0, 1000.0, 5.0)
+        grid.addWidget(self.lecomp_R_spin, 2, 1)
+
+        grid.addWidget(QLabel("R_start:"), 3, 0)
+        self.lecomp_Rstart_spin = dspin(0.0, 1000.0, 20.0)
+        grid.addWidget(self.lecomp_Rstart_spin, 3, 1)
+
+        grid.addWidget(QLabel("R_end:"), 4, 0)
+        self.lecomp_Rend_spin = dspin(0.0, 1000.0, 5.0)
+        grid.addWidget(self.lecomp_Rend_spin, 4, 1)
+
+        grid.addWidget(QLabel("N_steps:"), 5, 0)
+        self.lecomp_nsteps_spin = QSpinBox()
+        self.lecomp_nsteps_spin.setRange(1, 200)
+        self.lecomp_nsteps_spin.setValue(5)
+        grid.addWidget(self.lecomp_nsteps_spin, 5, 1)
+
+        grid.addWidget(QLabel("Start station:"), 6, 0)
+        self.lecomp_start_spin = QSpinBox()
+        self.lecomp_start_spin.setRange(-1, 9999)
+        self.lecomp_start_spin.setValue(-1)
+        self.lecomp_start_spin.setSpecialValueText("Wingtip (last)")
+        self.lecomp_start_spin.setToolTip("LE station index where R = R_start (0 = nose)")
+        grid.addWidget(self.lecomp_start_spin, 6, 1)
+
+        grid.addWidget(QLabel("End station:"), 7, 0)
+        self.lecomp_end_spin = QSpinBox()
+        self.lecomp_end_spin.setRange(-1, 9999)
+        self.lecomp_end_spin.setValue(0)
+        self.lecomp_end_spin.setSpecialValueText("Wingtip (last)")
+        self.lecomp_end_spin.setToolTip("LE station index where R = R_end (0 = nose)")
+        grid.addWidget(self.lecomp_end_spin, 7, 1)
+
+        grid.addWidget(QLabel("Blend length L_b:"), 8, 0)
+        self.lecomp_blend_spin = dspin(0.0, 100000.0, 0.0, dec=1, step=10.0)
+        self.lecomp_blend_spin.setSpecialValueText("Auto (30% chord)")
+        self.lecomp_blend_spin.setToolTip(
+            "Length along each upper grid line over which the offset decays to zero")
+        grid.addWidget(self.lecomp_blend_spin, 8, 1)
+
+        grid.addWidget(QLabel("Plateau factor k_p:"), 9, 0)
+        self.lecomp_kp_spin = dspin(1.0, 10.0, 1.2, dec=2, step=0.05, suffix="")
+        grid.addWidget(self.lecomp_kp_spin, 9, 1)
+
+        self.lecomp_check_btn = QPushButton("Check Feasibility / Plot")
+        self.lecomp_check_btn.setToolTip(
+            "Run the compensation on the current waverider and show R, L_B, h_u\n"
+            "and theta along the LE plus any infeasible stations. Nothing is exported.")
+        self.lecomp_check_btn.clicked.connect(self._lecomp_check)
+        grid.addWidget(self.lecomp_check_btn, 10, 0, 1, 2)
+
+        group.setLayout(grid)
+        self._update_lecomp_enabled()
+        return group
+
+    def _on_lecomp_toggled(self, state):
+        # Compensation exports a sharp pre-compensated LE; it cannot be combined
+        # with the blunted-geometry options.
+        if state and self.blunting_check.isChecked():
+            self.blunting_check.setChecked(False)
+        self._update_lecomp_enabled()
+
+    def _update_lecomp_enabled(self, *_):
+        on = self.lecomp_check.isChecked()
+        variable = self.lecomp_mode_combo.currentIndex() == 1
+        self.lecomp_mode_combo.setEnabled(on)
+        self.lecomp_R_spin.setEnabled(on and not variable)
+        for w in (self.lecomp_Rstart_spin, self.lecomp_Rend_spin, self.lecomp_nsteps_spin,
+                  self.lecomp_start_spin, self.lecomp_end_spin):
+            w.setEnabled(on and variable)
+        self.lecomp_blend_spin.setEnabled(on)
+        self.lecomp_kp_spin.setEnabled(on)
+        self.lecomp_check_btn.setEnabled(on)
+
+    def _lecomp_config(self, upper_streams):
+        """Build the compensation config from the widgets (stations -> arc length)."""
+        from waverider_generator.le_fillet_compensation import (
+            FilletCompensationConfig, le_arc_length)
+        s_mm = le_arc_length(np.array([u[0] for u in upper_streams])) * 1000.0
+        last = len(s_mm) - 1
+
+        def station_s(spin):
+            i = spin.value()
+            if i == -1:
+                i = last
+            if i > last:
+                raise ValueError(f"LE station {i} does not exist (stations 0..{last})")
+            return float(s_mm[i])
+
+        variable = self.lecomp_mode_combo.currentIndex() == 1
+        blend = self.lecomp_blend_spin.value()
+        return FilletCompensationConfig(
+            blunting_enabled=True,
+            fillet_mode="variable" if variable else "constant",
+            R_mm=self.lecomp_R_spin.value(),
+            R_start_mm=self.lecomp_Rstart_spin.value(),
+            R_end_mm=self.lecomp_Rend_spin.value(),
+            N_steps=self.lecomp_nsteps_spin.value(),
+            s_start_mm=station_s(self.lecomp_start_spin) if variable else None,
+            s_end_mm=station_s(self.lecomp_end_spin) if variable else None,
+            blend_length_mm=blend if blend > 0 else None,
+            plateau_factor=self.lecomp_kp_spin.value(),
+            mm_per_unit=1000.0,
+        )
+
+    def _run_lecomp(self, upper_streams, lower_streams):
+        from waverider_generator.le_fillet_compensation import compensate_le_mode_b
+        cfg = self._lecomp_config(upper_streams)
+        return compensate_le_mode_b(upper_streams, lower_streams, cfg)
+
+    def _show_lecomp_report(self, result, header="", files=()):
+        """Dialog with the R / L_B / h_u / theta plot and the feasibility report."""
+        from waverider_generator.le_fillet_compensation import plot_compensation
+        dlg = QDialog(self)
+        dlg.setWindowTitle("LE Fillet Compensation (Mode B)")
+        dlg.resize(900, 1000)
+        vbox = QVBoxLayout(dlg)
+        canvas = FigureCanvas(plot_compensation(result))
+        vbox.addWidget(canvas, stretch=3)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setStyleSheet("font-family: monospace;")
+        lines = [header] if header else []
+        lines.append(result.feasibility_report())
+        lines += [f"note: {m}" for m in result.messages]
+        if files:
+            lines.append("Written:")
+            lines += [f"  {f}" for f in files]
+        text.setPlainText("\n".join(lines))
+        vbox.addWidget(text, stretch=1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dlg.reject)
+        vbox.addWidget(buttons)
+        dlg.exec_()
+
+    def _lecomp_check(self):
+        if self.waverider is None:
+            QMessageBox.warning(self, "No waverider", "Generate a waverider first.")
+            return
+        try:
+            result = self._run_lecomp(self.waverider.upper_surface_streams,
+                                      self.waverider.lower_surface_streams)
+        except Exception as e:
+            QMessageBox.critical(self, "LE compensation error", str(e))
+            return
+        t = result.table
+        header = (f"theta {t['theta_deg'].min():.2f}-{t['theta_deg'].max():.2f} deg, "
+                  f"L_B max {t['L_B_mm'].max():.1f} mm, h_u max {t['h_u_mm'].max():.2f} mm")
+        self._show_lecomp_report(result, header)
+
+    @staticmethod
+    def _write_lecomp_outputs(result, base):
+        from waverider_generator.le_fillet_compensation import (
+            write_station_csv, write_control_points_csv, plot_compensation)
+        files = [base + "_lecomp_stations.csv"]
+        write_station_csv(result, files[0])
+        if result.control_points is not None:
+            files.append(base + "_lecomp_control_points.csv")
+            write_control_points_csv(result, files[-1])
+        files.append(base + "_lecomp.png")
+        plot_compensation(result, files[-1])
+        return files
+
     def _on_blunting_toggled(self, state):
         """Enable/disable blunting controls based on checkbox."""
         enabled = bool(state)
+        if enabled and getattr(self, 'lecomp_check', None) is not None \
+                and self.lecomp_check.isChecked():
+            self.lecomp_check.setChecked(False)
         self.blunting_radius_spin.setEnabled(enabled)
         self.blunting_method_combo.setEnabled(enabled)
         self.blunting_sweep_combo.setEnabled(enabled)
