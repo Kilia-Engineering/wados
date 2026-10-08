@@ -316,3 +316,12 @@ Shared-file changes, each proposed now and made only after approval:
 - Flag 2: confirmed. The unit-process figure in R1 (streamline × C+) is a valid mesh topology; only
   the closure relation is missing.
 - Everything else in §§3–7 checks out against the papers.
+
+---
+
+## 6. Gate 0 decisions (user, 2026-10-08)
+
+1. Meridian mapping: **intrinsic** (§3.1).
+2. CI: **add** `pytest ltoc/tests/ -q` to `.github/workflows/tests.yml`.
+3. V4/V5 tolerances: **approved** as proposed in §3.7.
+4. Reference PDFs: **not committed** (`docs/refs/*.pdf` is git-ignored; the index stays).

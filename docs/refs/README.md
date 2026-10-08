@@ -1,5 +1,7 @@
 # Reference papers
 
+The PDFs are **not committed** (copyright; `docs/refs/*.pdf` is git-ignored). Keep local copies here under the file names below; the DOIs link to the publishers.
+
 Tags match the LTOCs implementation spec ([`../ltoc/LTOC_implementation_spec.md`](../ltoc/LTOC_implementation_spec.md), §3).
 
 | Tag | File | Reference | Used for |
