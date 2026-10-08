@@ -21,7 +21,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDoubleSpinBox, QSpinBox, QCheckBox,
                              QMessageBox, QSplitter, QApplication, QScrollArea,
                              QTabWidget, QStackedWidget, QProgressBar,
-                             QDialog, QTextEdit, QDialogButtonBox)
+                             QDialog, QTextEdit, QDialogButtonBox,
+                             QFileDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -701,6 +702,25 @@ class PSWRWaveriderTab(QWidget):
         gen_row.addWidget(help_btn)
         gen_wrap = QWidget(); gen_wrap.setLayout(gen_row)
         left_layout.addWidget(gen_wrap)
+
+        export_row = QHBoxLayout()
+        export_style = ("QPushButton { background-color: #78350F; color: white; "
+                        "font-weight: bold; padding: 6px; }")
+        self.export_stl_btn = QPushButton("Export STL...")
+        self.export_stl_btn.setToolTip(
+            "Closed triangulated full-span STL in metres, GUI frame "
+            "(x streamwise, y up, z span)")
+        self.export_stl_btn.clicked.connect(self.export_stl)
+        self.export_step_btn = QPushButton("Export STEP...")
+        self.export_step_btn.setToolTip(
+            "Faceted full-span STEP solid in millimetres (needs cadquery)")
+        self.export_step_btn.clicked.connect(self.export_step)
+        for b in (self.export_stl_btn, self.export_step_btn):
+            b.setStyleSheet(export_style)
+            b.setEnabled(False)
+            export_row.addWidget(b)
+        export_wrap = QWidget(); export_wrap.setLayout(export_row)
+        left_layout.addWidget(export_wrap)
 
         self.status_label = QLabel("Ready")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -1624,6 +1644,8 @@ class PSWRWaveriderTab(QWidget):
                 f"Generated: {len(self.waverider.lower_surface_streams)} streams, "
                 f"y_tip={self.waverider.y_tip:.3f} m")
             self.status_label.setStyleSheet("color: green")
+            self.export_stl_btn.setEnabled(True)
+            self.export_step_btn.setEnabled(True)
 
         except Exception as e:
             self.status_label.setText(f"Error: {str(e)}")
@@ -1635,6 +1657,74 @@ class PSWRWaveriderTab(QWidget):
         if self.waverider is None:
             return
         self.canvas_3d.plot_waverider(self.waverider)
+
+    # ---- Export ---------------------------------------------------------
+
+    def _export_mesh(self, n_points=None):
+        """Closed full-span mesh of the current waverider in the GUI frame.
+
+        ``n_points`` sets the points per streamline; the default keeps the
+        generated chordwise resolution. The upper surface is flat and every
+        lower streamline is straight (variable-wedge flow), so
+        ``n_points=2`` already represents the geometry exactly.
+        """
+        from geometry_export import streams_to_mesh
+
+        wr = self.waverider
+        upper = [to_gui_frame(s) for s in wr.upper_surface]
+        lower = [to_gui_frame(s) for s in wr.lower_surface_streams]
+        return streams_to_mesh(upper, lower, full_span=False, n_points=n_points,
+                               kind="pswr1_waverider")
+
+    def export_stl(self):
+        if self.waverider is None:
+            QMessageBox.warning(self, "Export STL", "Generate a waverider first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PSWR-1 waverider as STL", "pswr1_waverider.stl",
+            "STL files (*.stl)")
+        if not path:
+            return
+        try:
+            from geometry_export import write_stl
+
+            mesh = self._export_mesh()
+            write_stl(mesh, path)
+            self.status_label.setText(f"STL written: {path}")
+            QMessageBox.information(
+                self, "Export STL",
+                f"STL written:\n{path}\n\n{mesh.n_faces} triangles, closed full-span surface\n"
+                "Units: METERS; frame x streamwise, y up, z span")
+        except Exception as e:
+            QMessageBox.critical(self, "Export STL", f"Failed:\n{e}")
+
+    def export_step(self):
+        if self.waverider is None:
+            QMessageBox.warning(self, "Export STEP", "Generate a waverider first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PSWR-1 waverider as STEP", "pswr1_waverider.step",
+            "STEP files (*.step *.stp)")
+        if not path:
+            return
+        try:
+            from geometry_export import StepUnavailableError, write_step
+
+            # Straight streamlines: two points each keep the STEP compact.
+            mesh = self._export_mesh(n_points=2)
+            self.status_label.setText("Writing STEP...")
+            QApplication.processEvents()
+            write_step(mesh, path)
+            self.status_label.setText(f"STEP written: {path}")
+            QMessageBox.information(
+                self, "Export STEP",
+                f"STEP written:\n{path}\n\nFaceted solid, {mesh.n_faces} faces\n"
+                "Units: MILLIMETRES; frame x streamwise, y up, z span")
+        except StepUnavailableError as e:
+            QMessageBox.warning(self, "Export STEP",
+                                f"STEP export needs cadquery, which is not available:\n\n{e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export STEP", f"Failed:\n{e}")
 
     def _update_profile_plots(self):
         if self.waverider is None:

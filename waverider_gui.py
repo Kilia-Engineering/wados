@@ -1176,7 +1176,7 @@ class WaveriderGUI(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # Left panel - OC Waverider parameters (hidden when cone-derived tab active)
+        # Left panel - OC Waverider parameters (shown only on the OC Waverider tab)
         self.oc_param_panel = self.create_parameter_panel()
         self.oc_param_panel.setMaximumWidth(380)
         main_layout.addWidget(self.oc_param_panel, 1)
@@ -2472,9 +2472,16 @@ class WaveriderGUI(QMainWindow):
         button_layout.addWidget(generate_btn)
         
         export_btn = QPushButton("Export CAD")
+        export_btn.setToolTip("Export a STEP solid (with the LE blunting / thickness options above)")
         export_btn.clicked.connect(self.export_cad)
         export_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
         button_layout.addWidget(export_btn)
+
+        export_stl_btn = QPushButton("Export STL")
+        export_stl_btn.setToolTip("Export a closed triangulated STL (metres) of the generated geometry")
+        export_stl_btn.clicked.connect(self.export_stl_oc)
+        export_stl_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
+        button_layout.addWidget(export_stl_btn)
         
         layout.addLayout(button_layout)
         
@@ -2498,6 +2505,7 @@ class WaveriderGUI(QMainWindow):
 
         # ── Tab 1: OC Waverider (merged 3D View, Base Plane, LE, Schematic, Imported) ──
         tab_viz = self._create_visualization_tab()
+        self._oc_tab_index = self.tab_widget.count()
         self.tab_widget.addTab(tab_viz, "OC Waverider")
 
         # ── Tab 2: Aero Analysis ──
@@ -3288,12 +3296,12 @@ class WaveriderGUI(QMainWindow):
         return tab
 
     def _on_main_tab_changed(self, index):
-        """Show/hide OC parameter panel based on active tab.
-        The cone-derived tab has its own built-in parameter panel."""
-        if index == self._cone_tab_index:
-            self.oc_param_panel.hide()
-        else:
-            self.oc_param_panel.show()
+        """Show the OC parameter panel only on the OC Waverider tab.
+
+        Every other tab (Aero Analysis, Optimization and the method tabs) has
+        its own controls, so the OC panel would only take space there.
+        """
+        self.oc_param_panel.setVisible(index == self._oc_tab_index)
 
     def set_default_parameters(self):
         """Set default parameters from example"""
@@ -3954,6 +3962,54 @@ class WaveriderGUI(QMainWindow):
                 f"Failed to export CAD file:\n\n{str(e)}"
             )
             self.info_label.setText(f"Export error: {str(e)}")
+
+    def export_stl_oc(self):
+        """Export the generated OC waverider as a closed binary STL (metres)."""
+        if self.waverider is None:
+            QMessageBox.warning(self, "No waverider",
+                                "Generate a waverider before exporting STL.")
+            return
+
+        items = ["Full vehicle (mirrored, both sides)", "Half only (right side)"]
+        choice, ok = QInputDialog.getItem(
+            self, "Export options", "Select geometry to export:", items, 0, False)
+        if not ok:
+            return
+        full_span = "Full vehicle" in choice
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export waverider STL", "waverider.stl",
+            "STL files (*.stl);;All files (*)")
+        if not filename:
+            return
+
+        try:
+            from geometry_export import streams_to_mesh, write_stl
+            mesh = streams_to_mesh(self.waverider.upper_surface_streams,
+                                   self.waverider.lower_surface_streams,
+                                   full_span=full_span, kind="oc_waverider")
+            write_stl(mesh, filename)
+
+            notes = []
+            if self.blunting_check.isChecked():
+                notes.append("LE blunting")
+            if self.min_thickness_check.isChecked():
+                notes.append("minimum thickness")
+            if getattr(self, "lecomp_check", None) is not None and self.lecomp_check.isChecked():
+                notes.append("LE compensation")
+            note = ""
+            if notes:
+                note = ("\n\nThe STL is the sharp generated geometry; "
+                        + ", ".join(notes) + " are applied by 'Export CAD' (STEP) only.")
+            QMessageBox.information(
+                self, "Export successful",
+                f"STL file exported to:\n{filename}\n\n"
+                f"{mesh.n_faces} triangles, closed surface\n"
+                f"Units: METERS (SI)" + note)
+            self.info_label.setText(f"✓ STL file exported to: {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export error", f"Failed to export STL:\n\n{e}")
+            self.info_label.setText(f"Export error: {e}")
 
     def _export_cad_lecomp(self, filename, sides, min_thickness):
         """STEP export of the Mode B pre-compensated geometry (sharp LE)."""
