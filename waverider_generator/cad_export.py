@@ -323,6 +323,194 @@ def build_waverider_solid(upper_streams, lower_streams, le_curve,
     return right_side
 
 
+def _interpolate_curve_poles(points, params, tol=1e-9):
+    """Cubic C2 interpolation through ``points`` at ``params``; returns
+    (poles (n_poles, 3), knots, mults, degree)."""
+    from OCP.GeomAPI import GeomAPI_Interpolate
+    from OCP.TColgp import TColgp_HArray1OfPnt
+    from OCP.TColStd import TColStd_HArray1OfReal
+    from OCP.gp import gp_Pnt
+
+    n = len(points)
+    h_pts = TColgp_HArray1OfPnt(1, n)
+    h_par = TColStd_HArray1OfReal(1, n)
+    for k in range(n):
+        h_pts.SetValue(k + 1, gp_Pnt(*[float(v) for v in points[k]]))
+        h_par.SetValue(k + 1, float(params[k]))
+    interp = GeomAPI_Interpolate(h_pts, h_par, False, tol)
+    interp.Perform()
+    if not interp.IsDone():
+        raise RuntimeError("GeomAPI_Interpolate failed")
+    c = interp.Curve()
+    poles = np.array([[c.Pole(k).X(), c.Pole(k).Y(), c.Pole(k).Z()]
+                      for k in range(1, c.NbPoles() + 1)])
+    knots = [c.Knot(k) for k in range(1, c.NbKnots() + 1)]
+    mults = [c.Multiplicity(k) for k in range(1, c.NbKnots() + 1)]
+    return poles, knots, mults, c.Degree()
+
+
+def _tensor_interpolated_surface(grid, u_params, v_params):
+    """
+    B-spline surface interpolating a structured grid (n_i, n_j, 3) with
+    prescribed parameters: u_params over i, v_params over j (global surface
+    interpolation, Piegl & Tiller 9.2.5).  Two surfaces built with the same
+    u_params and the same i=0 or j=0 rows share those boundary curves
+    exactly, which is what makes the sewn shell watertight.  A row of
+    coincident points (pinched wingtip) gives a degenerate boundary.
+    """
+    from OCP.Geom import Geom_BSplineSurface
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
+    from OCP.gp import gp_Pnt
+
+    grid = np.asarray(grid, dtype=float)
+    n_i, n_j, _ = grid.shape
+
+    # pass 1: columns (over i) at fixed j, common u parameters
+    col_poles, u_knots, u_mults, u_deg = [], None, None, None
+    for j in range(n_j):
+        poles, knots, mults, deg = _interpolate_curve_poles(grid[:, j], u_params)
+        if u_knots is None:
+            u_knots, u_mults, u_deg = knots, mults, deg
+        elif not np.allclose(knots, u_knots):
+            raise RuntimeError("column interpolants do not share a knot vector")
+        col_poles.append(poles)
+    col_poles = np.array(col_poles)            # (n_j, n_pu, 3)
+    n_pu = col_poles.shape[1]
+
+    # pass 2: for each u-pole index, interpolate over j with common v parameters
+    net, v_knots, v_mults, v_deg = [None] * n_pu, None, None, None
+    const_rows = []
+    for k in range(n_pu):
+        row = col_poles[:, k]
+        if np.ptp(row, axis=0).max() < 1e-12:
+            const_rows.append(k)
+            continue
+        poles, knots, mults, deg = _interpolate_curve_poles(row, v_params)
+        if v_knots is None:
+            v_knots, v_mults, v_deg = knots, mults, deg
+        elif not np.allclose(knots, v_knots):
+            raise RuntimeError("row interpolants do not share a knot vector")
+        net[k] = poles
+    if v_knots is None:
+        raise RuntimeError("surface grid is degenerate")
+    n_pv = len(net[next(k for k in range(n_pu) if net[k] is not None)])
+    for k in const_rows:                        # pinched row: constant poles
+        net[k] = np.tile(col_poles[0, k], (n_pv, 1))
+
+    poles = TColgp_Array2OfPnt(1, n_pu, 1, n_pv)
+    for k in range(n_pu):
+        for l in range(n_pv):
+            poles.SetValue(k + 1, l + 1, gp_Pnt(*[float(v) for v in net[k][l]]))
+
+    def _arr_real(vals):
+        a = TColStd_Array1OfReal(1, len(vals))
+        for k, v in enumerate(vals):
+            a.SetValue(k + 1, float(v))
+        return a
+
+    def _arr_int(vals):
+        a = TColStd_Array1OfInteger(1, len(vals))
+        for k, v in enumerate(vals):
+            a.SetValue(k + 1, int(v))
+        return a
+
+    return Geom_BSplineSurface(poles, _arr_real(u_knots), _arr_real(v_knots),
+                               _arr_int(u_mults), _arr_int(v_mults), u_deg, v_deg,
+                               False, False)
+
+
+def _face_from_surface(surface):
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    fb = BRepBuilderAPI_MakeFace(surface, 1e-6)
+    fb.Build()
+    if not fb.IsDone():
+        raise RuntimeError(f"BRepBuilderAPI_MakeFace failed (error code={fb.Error()})")
+    return cq.Face(fb.Face())
+
+
+def _classify_boundary_edges(face, length, span_tol):
+    """Non-degenerate edges of a half-model face: 'te' (x = L), 'sym' (z = 0), 'le'."""
+    from OCP.BRep import BRep_Tool
+    out = {}
+    for edge in face.Edges():
+        if BRep_Tool.Degenerated_s(edge.wrapped):
+            continue
+        p = edge.positionAt(0.5)
+        if abs(p.x - length) < span_tol:
+            out["te"] = edge
+        elif abs(p.z) < span_tol:
+            out["sym"] = edge
+        else:
+            out["le"] = edge
+    if set(out) != {"te", "sym", "le"}:
+        raise RuntimeError(f"could not classify face boundary edges: {sorted(out)}")
+    return out
+
+
+def build_compensated_solid(upper_streams, lower_streams, length, n_fit=120):
+    """
+    Left-half solid (z >= 0, geometry units) for fillet-compensated streams.
+
+    The compensated upper surface carries an offset of order R cot(theta/2)
+    that decays over the blend length; interpPlate cannot follow it (its
+    plate is approximated by at most 9 B-spline segments), so both faces
+    are B-spline surfaces interpolating the grids, resampled to ``n_fit``
+    points per line with cosine clustering towards the LE.  Both surfaces
+    use the LE arc length as the station parameter, so they share the LE
+    curve exactly; the base and symmetry faces are built from the
+    surfaces' own boundary edges.  The pinched wingtip is a degenerate
+    boundary of each surface, like a cone apex.
+    """
+    from waverider_generator.le_fillet_compensation import resample_stream, le_arc_length
+    us = [resample_stream(s, n_fit) for s in upper_streams]
+    ls = [resample_stream(s, n_fit) for s in lower_streams]
+    # keep the shared LE and the planar base exact after resampling
+    for a, b, u0, l0 in zip(us, ls, upper_streams, lower_streams):
+        a[0], b[0] = u0[0], l0[0]
+        a[-1, 0] = b[-1, 0] = length
+    le = np.array([a[0] for a in us])
+    u_params = le_arc_length(le)
+    v_params = 1.0 - np.cos(0.5 * np.pi * np.linspace(0.0, 1.0, n_fit))
+
+    upper = _face_from_surface(_tensor_interpolated_surface(np.array(us), u_params, v_params))
+    lower = _face_from_surface(_tensor_interpolated_surface(np.array(ls), u_params, v_params))
+    print(f"[BSpline] Interpolating surfaces through {len(us)}x{n_fit} grids OK")
+
+    tol = 1e-6 * max(length, 1.0)
+    eu = _classify_boundary_edges(upper, length, tol)
+    el = _classify_boundary_edges(lower, length, tol)
+
+    te_u0, te_l0 = us[0][-1], ls[0][-1]        # centreline TE points
+    sym_line = cq.Edge.makeLine(cq.Vector(*map(float, te_u0)), cq.Vector(*map(float, te_l0)))
+    back = cq.Face.makeFromWires(cq.Wire.assembleEdges([eu["te"], sym_line, el["te"]]))
+
+    sym_edges = [eu["sym"], sym_line, el["sym"]]
+    if np.linalg.norm(us[0][0] - ls[0][0]) > tol:
+        sym_edges.append(cq.Edge.makeLine(cq.Vector(*map(float, ls[0][0])),
+                                          cq.Vector(*map(float, us[0][0]))))
+    sym = cq.Face.makeFromWires(cq.Wire.assembleEdges(sym_edges))
+
+    faces = [upper, lower, back, sym]
+    print(f"[Solid] Sewing {len(faces)} faces (compensated LE)")
+    return _sew_faces_to_solid(faces, tolerance=tol)
+
+
+def to_CAD_compensated(waverider, result, sides, export, filename, scale=1.0,
+                       min_thickness=0.0, n_fit=120):
+    """
+    STEP export of a Mode B fillet-compensated waverider.
+
+    ``result`` is a CompensationResult from le_fillet_compensation; its
+    streams replace the sharp ones.  Same sides / scale / export semantics
+    as to_CAD.  Minimum thickness, if any, must have been applied to the
+    streams before compensation.
+    """
+    left_side = build_compensated_solid(result.upper_streams, result.lower_streams,
+                                        waverider.length, n_fit=n_fit).scale(scale)
+    return _finish_sides(left_side, sides, export, filename, scale)
+
+
 def build_shock_cone_face(shock_angle_rad, length, leading_edge=None,
                           half_only=False, **kwargs):
     """
@@ -691,6 +879,11 @@ def to_CAD(waverider:waverider,sides : str,export: bool,filename: str,**kwargs):
         le_scaled = le * scale
         left_side = _apply_le_fillet(left_side, blunting_radius * scale, le_scaled)
 
+    return _finish_sides(left_side, sides, export, filename, scale)
+
+
+def _finish_sides(left_side, sides, export, filename, scale):
+    """Mirror the left half, pick the requested side(s) and export."""
     right_side = left_side.mirror(mirrorPlane='XY')
 
     if sides=="left":

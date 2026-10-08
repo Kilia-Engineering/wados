@@ -248,9 +248,12 @@ def test_real_oc_waverider(oc_default, cfg):
         # upper and lower edges coincide at P'
         assert np.array_equal(lo[0], res.le_new[i])
         assert np.array_equal(up[0], res.le_new[i])
-        # upper points beyond the blend zone are untouched
+        # upper points beyond every station's blend zone are untouched (a point
+        # is translated by the Delta of the station whose normal plane holds it)
         xi = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(up, axis=0), axis=1))])
-        far = xi > (t["xi_p_mm"][i] + t["L_b_mm"][i]) / 1000.0 + np.linalg.norm(res.le_new[i] - us[i][0])
+        zone = np.max((t["xi_p_mm"] + t["L_b_mm"]) / np.sin(np.radians(t["phi_u_deg"]))) / 1000.0
+        far = xi > zone + np.linalg.norm(res.le_new[i] - us[i][0])
+        assert far.any() or t["chord_u_mm"][i] < 1.5 * zone * 1000.0
         for p in up[far]:
             assert np.any(np.all(us[i] == p, axis=1))
 
@@ -418,3 +421,53 @@ def test_symmetry_tangent_is_exactly_spanwise():
     assert np.allclose(e[1], (le[2] - le[0]) / np.linalg.norm(le[2] - le[0]))
     # without the symmetry hint the one-sided difference leans streamwise
     assert le_tangents(le)[0][0] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 6. In-plane landing correction
+# ---------------------------------------------------------------------------
+
+def test_exact_landing_is_identity_on_planar_wedges():
+    # the swept grid must be wide enough for the normal plane to reach the
+    # fillet zone (t_u cot(phi) ~ 26 mm inboard at 70 deg sweep)
+    for upper, lower in (wedge_2d_extruded(12.0, n_j=201),
+                         swept_wedge(12.0, 70.0, n_i=80, dz=1.0)):
+        off = compensate_le_mode_b(upper, lower, _unit_cfg(R_mm=1.0), symmetry_station=None)
+        on = compensate_le_mode_b(upper, lower, _unit_cfg(R_mm=1.0, exact_landing=True),
+                                  symmetry_station=None)
+        t = on.table
+        ok = np.isfinite(t["landing_mm"])
+        assert ok.sum() >= 2
+        assert np.max(np.abs(t["landing_mm"][ok])) < 1e-6
+        assert np.allclose(t["L_B_mm"], t["L_B_planar_mm"], atol=1e-6)
+        assert t["landing_iterations"] == 1
+        for a, b in zip(on.upper_streams, off.upper_streams):
+            assert np.allclose(a, b, atol=1e-6)
+
+
+def test_real_oc_exact_landing(oc_default):
+    cfg = FilletCompensationConfig(blunting_enabled=True, fillet_mode="variable",
+                                   R_start_mm=20.0, R_end_mm=5.0, N_steps=5,
+                                   exact_landing=True)
+    res = compensate_le_mode_b(oc_default.upper_surface_streams,
+                               oc_default.lower_surface_streams, cfg)
+    t = res.table
+    active = (t["R_mm"] > 0) & ~t["degenerate"]
+    assert np.all(np.isfinite(t["landing_mm"][active]))
+    assert np.max(np.abs(t["landing_mm"][active])) < cfg.landing_tol_mm
+    assert 1 < t["landing_iterations"] <= cfg.landing_max_iter
+    corr = t["L_B_mm"] - t["L_B_planar_mm"]
+    assert 0.1 < np.max(np.abs(corr[active])) < 10.0        # real but small correction
+    # the closed-form prediction of the uncorrected landing is of the same size
+    plain = compensate_le_mode_b(oc_default.upper_surface_streams,
+                                 oc_default.lower_surface_streams,
+                                 FilletCompensationConfig(**{**cfg.__dict__, "exact_landing": False}))
+    pl = plain.table["landing_mm"]
+    assert np.max(np.abs(pl[active])) > 0.5
+    # invariants still hold
+    for i in range(len(t["station"])):
+        assert np.array_equal(res.lower_streams[i][-len(oc_default.lower_surface_streams[i]):],
+                              oc_default.lower_surface_streams[i])
+        assert np.array_equal(res.upper_streams[i][0], res.le_new[i])
+        assert np.array_equal(res.lower_streams[i][0], res.le_new[i])
+    assert res.le_new[0, 2] == 0.0

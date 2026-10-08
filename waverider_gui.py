@@ -1313,6 +1313,7 @@ class WaveriderGUI(QMainWindow):
             'lecomp_blend_mm': self.lecomp_blend_spin.value(),
             'lecomp_kp': self.lecomp_kp_spin.value(),
             'lecomp_tip_taper_mm': self.lecomp_taper_spin.value(),
+            'lecomp_exact_landing': self.lecomp_exact_check.isChecked(),
         }
 
     def _set_oc_params_dict(self, d):
@@ -1358,6 +1359,7 @@ class WaveriderGUI(QMainWindow):
         _s(self.lecomp_blend_spin, d.get('lecomp_blend_mm'))
         _s(self.lecomp_kp_spin, d.get('lecomp_kp'))
         _s(self.lecomp_taper_spin, d.get('lecomp_tip_taper_mm'))
+        _s(self.lecomp_exact_check, d.get('lecomp_exact_landing'))
         _s(self.lecomp_check, d.get('lecomp_enabled'))
 
     def _write_params_to_file(self, path):
@@ -3955,7 +3957,7 @@ class WaveriderGUI(QMainWindow):
 
     def _export_cad_lecomp(self, filename, sides, min_thickness):
         """STEP export of the Mode B pre-compensated geometry (sharp LE)."""
-        from waverider_generator.le_fillet_compensation import compensated_copy
+        from waverider_generator.cad_export import to_CAD_compensated
 
         us = self.waverider.upper_surface_streams
         ls = self.waverider.lower_surface_streams
@@ -3981,17 +3983,16 @@ class WaveriderGUI(QMainWindow):
 
         self.info_label.setText("Exporting compensated STEP file...")
         QApplication.processEvents()
-        # min thickness was applied before compensation; no blunting on top
-        to_CAD(
-            waverider=compensated_copy(self.waverider, result),
+        # Exact B-spline interpolation of the compensated grids; interpPlate
+        # (used by the sharp path) cannot follow the LE offset.  Minimum
+        # thickness was applied to the streams before compensation.
+        to_CAD_compensated(
+            waverider=self.waverider,
+            result=result,
             sides=sides,
             export=True,
             filename=filename,
             scale=1000.0,
-            blunting_radius=0.0,
-            blunting_method="auto",
-            min_thickness=0.0,
-            sweep_scaled=False,
         )
 
         cfg = result.config
@@ -4003,6 +4004,8 @@ class WaveriderGUI(QMainWindow):
             f"LE fillet compensation (Mode B): {sched}, k_p = {cfg.plateau_factor:g}\n"
             + (f"Tip taper: R capped over the last {result.tip_taper['length_mm']:.0f} mm of the LE\n"
                if result.tip_taper.get("length_mm", 0) > 0 else "")
+            + ("Landing correction: on (L_B iterated on the grid sections)\n"
+               if cfg.exact_landing else "Landing correction: off (closed-form L_B)\n")
             + f"Apply the fillet in CAD on the new sharp edge.\n"
             f"CSV frame: {side} half ({'z <= 0' if side == 'right' else 'z >= 0'}), mm.\n\n"
             "Written:\n" + "\n".join(files))
@@ -4100,12 +4103,21 @@ class WaveriderGUI(QMainWindow):
             "then reported and block the export).")
         grid.addWidget(self.lecomp_taper_spin, 10, 1)
 
+        self.lecomp_exact_check = QCheckBox("Exact landing (iterate L_B on grid sections)")
+        self.lecomp_exact_check.setToolTip(
+            "After the closed-form Mode B step, section the compensated grids in\n"
+            "each LE normal plane, fit the rolling ball of radius R to both faces\n"
+            "and adjust L_B until its foremost point sits on the original LE.\n"
+            "Removes the planar-wedge model's residual (face curvature over the\n"
+            "fillet zone). Both L_B values are written to the station CSV.")
+        grid.addWidget(self.lecomp_exact_check, 11, 0, 1, 2)
+
         self.lecomp_check_btn = QPushButton("Check Feasibility / Plot")
         self.lecomp_check_btn.setToolTip(
             "Run the compensation on the current waverider and show R, L_B, h_u\n"
             "and theta along the LE plus any infeasible stations. Nothing is exported.")
         self.lecomp_check_btn.clicked.connect(self._lecomp_check)
-        grid.addWidget(self.lecomp_check_btn, 11, 0, 1, 2)
+        grid.addWidget(self.lecomp_check_btn, 12, 0, 1, 2)
 
         group.setLayout(grid)
         self._update_lecomp_enabled()
@@ -4129,6 +4141,7 @@ class WaveriderGUI(QMainWindow):
         self.lecomp_blend_spin.setEnabled(on)
         self.lecomp_kp_spin.setEnabled(on)
         self.lecomp_taper_spin.setEnabled(on)
+        self.lecomp_exact_check.setEnabled(on)
         self.lecomp_check_btn.setEnabled(on)
 
     def _lecomp_config(self, upper_streams):
@@ -4161,6 +4174,7 @@ class WaveriderGUI(QMainWindow):
             blend_length_mm=blend if blend > 0 else None,
             plateau_factor=self.lecomp_kp_spin.value(),
             tip_taper_mm=None if taper < 0 else taper,
+            exact_landing=self.lecomp_exact_check.isChecked(),
             mm_per_unit=1000.0,
         )
 
