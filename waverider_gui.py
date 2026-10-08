@@ -4104,6 +4104,7 @@ class WaveriderGUI(QMainWindow):
         grid.addWidget(self.lecomp_taper_spin, 10, 1)
 
         self.lecomp_exact_check = QCheckBox("Exact landing (iterate L_B on grid sections)")
+        self.lecomp_exact_check.setChecked(True)
         self.lecomp_exact_check.setToolTip(
             "After the closed-form Mode B step, section the compensated grids in\n"
             "each LE normal plane, fit the rolling ball of radius R to both faces\n"

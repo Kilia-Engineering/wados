@@ -80,8 +80,9 @@ class FilletCompensationConfig:
     tip_taper_mm: Optional[float] = None   # None -> auto, 0 -> off, >0 fixed length
     # In-plane landing correction: iterate L_B per station until the ball of
     # radius R tangent to both compensated grid sections (in the normal plane)
-    # has its foremost point on the original LE.  Off: closed-form L_B only.
-    exact_landing: bool = False
+    # has its foremost point on the original LE.  False: closed-form L_B only
+    # (lands 0.5-5 mm behind the LE on the OC vehicle for R = 5-16 mm).
+    exact_landing: bool = True
     landing_tol_mm: float = 1e-2
     landing_max_iter: int = 15
     section_points: int = 200              # resampled points per stream for sections
