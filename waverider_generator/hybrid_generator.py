@@ -66,6 +66,8 @@ from scipy.interpolate import interp1d
 from scipy.optimize import root_scalar
 from scipy.integrate import solve_ivp
 from typing import Union
+from waverider_generator.stream_mesh import (build_stream_mesh, write_ascii_stl,
+                                           write_tri)
 
 # --------------------------------------------------------------------------- #
 #  Re-use flowfield primitives from the existing package if available,        #
@@ -1237,3 +1239,25 @@ class GOCWaverider:
         le_x = self._leading_edge[:, 0]
         le_z = self._leading_edge[:, 2]
         return 2.0 * abs(np.trapezoid(self.length - le_x, le_z))
+
+    # ===================================================================== #
+    #  Mesh export                                                          #
+    # ===================================================================== #
+
+    def _build_mesh(self):
+        """Closed triangulated half-model (vertices, 0-based triangles)."""
+        return build_stream_mesh(self.upper_surface_streams,
+                                 self.lower_surface_streams)
+
+    def export_stl(self, filename):
+        """Export the half-model mesh as an ASCII STL file (metres)."""
+        vertices, triangles = self._build_mesh()
+        write_ascii_stl(vertices, triangles, filename,
+                        solid_name="hybrid_waverider")
+        print(f"[Hybrid] STL exported to {filename}")
+
+    def export_tri(self, filename):
+        """Export the half-model mesh in NASA Cart3D TRI format (metres)."""
+        vertices, triangles = self._build_mesh()
+        write_tri(vertices, triangles, filename)
+        print(f"[Hybrid] TRI exported to {filename}")
