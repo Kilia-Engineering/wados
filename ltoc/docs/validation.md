@@ -3,7 +3,7 @@
 This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate1_moc_kernel`, which writes `docs/ltoc/figures/gate1_*.png` and `gate1_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 28 passed, ~30 s
+pytest ltoc/tests/ -q        # 44 passed, ~30 s
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -94,3 +94,35 @@ The following are refused with a clear exception (`test_initial_line_must_be_spa
 - a shock angle at or below the freestream Mach angle;
 - subsonic post-shock flow;
 - an initial line at or below the axis.
+
+---
+
+## Phase 2: shock geometry (`ltoc/shock_surface.py`, `ltoc/shock_geometry.py`)
+
+Tests are in `ltoc/tests/test_shock_geometry.py`. Figures and numbers come from `python -m ltoc.examples.gate2_shock_geometry`.
+
+### V3: cone, and the flag 1 and flag 3 identities
+
+| Check | Reference | Worst error | Test |
+|---|---|---|---|
+| Cone (β = 12°, 20°, 35°): the shock curve stays on its generator | azimuth constant | 0 (exact) | `test_v3_cone_shock_curve_is_generator_and_r_is_cone_radius` |
+| Cone: β along the curve | β | 1.1e−16 rad | same |
+| Cone: r = cone radius X tan β | analytic | 1.0e−15 | same |
+| Cone: axis centre on the X axis | 0 | 6.7e−16 | same |
+| Cone: intrinsic meridian ordinate y rises at tan β; y_axis constant | analytic | < 1e−13 | same |
+| Flag 1: dY/dX = −Z_X Z_Y / (1 + Z_Y²) on an elliptic cone | closed form | 2.2e−16 | `test_v3_flag1_shock_curve_slope_identity` |
+| Flag 1: R1 Eq. (1) as printed (opposite sign) | — | differs by 0.58 | same |
+| Flag 3: r = cos β / κ_b equals the cross-section radius, elliptic cones a/b = 1, 0.875, 0.42 | ellipse formula | 1.1e−15 relative | `test_v3_flag3_radius_equals_cross_section_radius_elliptic_cone` |
+| Flag 3 on the R1 Eq. (18) shock | finite differences of the X = const section | < 1e−7 relative | `test_v3_flag3_on_variable_elliptic_shock_by_finite_differences` |
+
+### Other shock surfaces
+
+| Check | Result | Test |
+|---|---|---|
+| `OsculatingConeShock` base-plane curve against the OC generator's SWPC samples (M 5, β 15°) | 1.1e−9 m | `test_osculating_cone_shock_matches_oc_generator` |
+| `OsculatingConeShock` axis centres against the OC generator's `cone_centers` | 1.1e−9 m | same |
+| `OsculatingConeShock`: shock curves stay in their osculating planes, β constant, axis centre fixed, dr/dx = tan β | to round-off | same |
+| `BSplineShock` (60 × 30 grid) against its source, R1 Eq. (25) | point 4.5e−9, β 5.5e−8 rad, r 8.4e−5 relative | `test_bspline_shock_reproduces_source_surface` |
+| R1 Eqs. (18), (23), (25): convex, attached, above the Mach angle along the shock curves | no flags raised | `test_published_r1_shocks_are_convex_and_attached` |
+| R2 Eq. (13) quartic shock: κ_b > 0 (centres on the body side) | yes | `test_r2_quartic_shock_curvature_is_positive_toward_the_body` |
+| R1 Eq. (25): the shock curves turn (azimuth drift) and the axis centres drift | 12° and 0.46 at most | `test_shock_curves_turn_on_elliptic_shocks` |
