@@ -59,6 +59,8 @@ relation. They differ in the mesh.
     column 0 is the streamline from the first shock point. This is the
     waverider body in LTOCs.
 
+``scheme="streamline"`` is the default (Gate 1 decision, 2026-10-08).
+
 Both schemes use the modified-Euler average-property predictor-corrector of
 Zucrow & Hoffman. Both store the solution in the same triangular layout:
 row ``d`` has ``n - d`` points, where ``n`` is the number of initial-line
@@ -768,7 +770,7 @@ class MOCSolution:
 # ---------------------------------------------------------------------------
 
 def solve_inverse(initial: InitialLine, rule: AxisRule, gamma: float = 1.4, *,
-                  scheme: str = "characteristic", n_rows: Optional[int] = None,
+                  scheme: str = "streamline", n_rows: Optional[int] = None,
                   strict: bool = False, tol: float = 1e-10, max_iter: int = 60,
                   extrapolation_limit: float = 3.0) -> MOCSolution:
     """March inward from ``initial`` with the chosen scheme.
@@ -781,8 +783,10 @@ def solve_inverse(initial: InitialLine, rule: AxisRule, gamma: float = 1.4, *,
         strictly between the C- and C+ directions.
     rule : AxisRule
         Planar, coaxial or noncoaxial source-term radius.
-    scheme : {"characteristic", "streamline"}
-        Mesh topology; see the module docstring.
+    scheme : {"streamline", "characteristic"}
+        Mesh topology; see the module docstring. ``"streamline"`` is the
+        default for LTOCs (Gate 1 decision). ``"characteristic"`` is kept as
+        an independent cross-check.
     n_rows : int, optional
         Rows to compute after the initial line. The default and the maximum is
         ``len(initial.x) - 1``.

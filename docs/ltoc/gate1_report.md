@@ -132,3 +132,9 @@ It is also the topology on which R1's Step C and R3's adaptive refinement (spec 
 - **Spec flag 2, "R4 Fig. 1 two-family mesh".** It needs the streamline-origin bookkeeping above to be correct behind a curved shock. The streamline topology avoids the issue.
 - **Interpolation accuracy.** Not covered by the spec. Linear interpolation at the foot is first order; cubic is needed for second order (§2.2).
 - **Existing Taylor–Maccoll solver.** Its accuracy is about 7e−5 in θ (rtol 1e−6, sparse knots). That is enough for the 0.1 % V1 criterion but not for convergence studies, hence `ltoc.reference`. Note for later: the solver used by the OC generator (`waverider_generator/flowfield.py`) has looser tolerances still; this matters for the V5 comparison (Gate 0 §3.7).
+
+---
+
+## 7. Gate 1 decision (user, 2026-10-08)
+
+The **streamline mesh is the default** (`solve_inverse(..., scheme="streamline")`). The characteristic net stays as a cross-check in the tests. Gate 1 is approved; Phase 2 follows.
