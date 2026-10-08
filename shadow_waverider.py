@@ -14,6 +14,8 @@ Author: Adapted for integration with existing waverider_generator package
 """
 
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 import math
 from scipy.integrate import solve_ivp
 from scipy.interpolate import UnivariateSpline, interp1d, CubicSpline
@@ -815,7 +817,7 @@ class ShadowWaverider:
         try:
             self.planform_area = abs(np.trapezoid(chords, z_pos))
         except AttributeError:
-            self.planform_area = abs(np.trapz(chords, z_pos))
+            self.planform_area = abs(np.trapezoid(chords, z_pos))
         
         # Volume (simplified estimate using cross-sections)
         self.volume = self._estimate_volume()
@@ -875,7 +877,7 @@ class ShadowWaverider:
             try:
                 area = np.trapezoid(height_sorted, z_sorted)
             except AttributeError:
-                area = np.trapz(height_sorted, z_sorted)
+                area = np.trapezoid(height_sorted, z_sorted)
             
             areas.append(abs(area))
         
@@ -886,7 +888,7 @@ class ShadowWaverider:
         try:
             volume = np.trapezoid(areas, x_positions)
         except AttributeError:
-            volume = np.trapz(areas, x_positions)
+            volume = np.trapezoid(areas, x_positions)
         
         return abs(volume)
     
@@ -915,7 +917,7 @@ class ShadowWaverider:
         try:
             integral = np.trapezoid(chords[half:]**2, z_pos[half:])
         except AttributeError:
-            integral = np.trapz(chords[half:]**2, z_pos[half:])
+            integral = np.trapezoid(chords[half:]**2, z_pos[half:])
 
         S = max(self.planform_area, 1e-10)
         mac = (2.0 / S) * abs(integral)

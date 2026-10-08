@@ -9,6 +9,8 @@ import os
 import time
 import traceback
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QGridLayout,
@@ -383,7 +385,7 @@ class VMPLOOptimizationWorker(QThread):
                     if s.shape[0] >= 2:
                         chords.append(s[-1, 0] - s[0, 0])
                         z_pos.append(s[0, 2])
-                a_half = float(np.trapz(chords, z_pos)) if len(chords) > 2 else 1e-6
+                a_half = float(np.trapezoid(chords, z_pos)) if len(chords) > 2 else 1e-6
                 a_plan = 2.0 * max(a_half, 1e-6)  # full vehicle
 
                 eta = vol ** (2.0 / 3.0) / a_plan

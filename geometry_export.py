@@ -31,7 +31,10 @@ import numpy as np
 __all__ = [
     "resample_stream",
     "mirror_to_full_span",
+    "grid_to_streams",
+    "select_stations",
     "streams_to_mesh",
+    "span_frame_to_gui",
     "write_stl",
     "write_step",
     "StepUnavailableError",
@@ -61,6 +64,37 @@ def resample_stream(stream: np.ndarray, n: int) -> np.ndarray:
     out = np.column_stack([np.interp(t, arc, s[:, k]) for k in range(3)])
     out[0], out[-1] = s[0], s[-1]
     return out
+
+
+def grid_to_streams(X, Y, Z) -> list:
+    """Streams from (n_stream, n_station) coordinate grids (one column per station)."""
+    X, Y, Z = (np.asarray(a, dtype=float) for a in (X, Y, Z))
+    return [np.column_stack([X[:, j], Y[:, j], Z[:, j]]) for j in range(X.shape[1])]
+
+
+def select_stations(streams: Sequence[np.ndarray], n: int) -> list:
+    """Keep ``n`` evenly spaced stations, always including the first and last."""
+    k = len(streams)
+    if n >= k:
+        return list(streams)
+    idx = np.unique(np.round(np.linspace(0, k - 1, max(n, 2))).astype(int))
+    return [streams[i] for i in idx]
+
+
+def span_frame_to_gui(mesh):
+    """Mesh in the (x streamwise, y span, z up) frame of GVWD / PSWR-1, converted
+    to the GUI frame (x streamwise, y up, z span).
+
+    The axis swap is a reflection, so the triangle winding is reversed to keep
+    the normals pointing outward.
+    """
+    from gvwd.geometry.mesh import Mesh
+
+    v = np.asarray(mesh.vertices, dtype=float)[:, [0, 2, 1]]
+    f = np.asarray(mesh.faces, dtype=int)[:, [0, 2, 1]]
+    meta = dict(getattr(mesh, "metadata", {}) or {})
+    meta["frame"] = "gui (x streamwise, y up, z span)"
+    return Mesh(v, f, labels=getattr(mesh, "labels", None), metadata=meta)
 
 
 def mirror_to_full_span(streams: Sequence[np.ndarray], span_axis: int = 2,

@@ -9,6 +9,8 @@ import os
 import json
 import shutil
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QGroupBox, QGridLayout, QSlider, QDoubleSpinBox,
@@ -120,7 +122,7 @@ def calculate_waverider_volume(waverider_obj):
         half_volume = np.trapezoid(areas, x_positions)
     except AttributeError:
         # Fallback for older numpy versions
-        half_volume = np.trapz(areas, x_positions)
+        half_volume = np.trapezoid(areas, x_positions)
     
     # Full volume (symmetric waverider - multiply by 2)
     return 2.0 * abs(half_volume)
@@ -3946,7 +3948,7 @@ class WaveriderGUI(QMainWindow):
             QMessageBox.information(
                 self, "Export successful",
                 f"STEP file exported to:\n{filename}\n\n"
-                f"Units: METERS (SI)\n"
+                f"Units: MILLIMETRES (geometry scaled x1000 from metres; true size in CAD)\n"
                 f"{blunt_msg}\n"
                 f"To create STL mesh for analysis:\n"
                 f"1. Go to 'Aerodynamic Analysis' tab\n"

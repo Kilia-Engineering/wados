@@ -1277,13 +1277,14 @@ class GVWDWaveriderTab(QWidget):
 
         self.btn_export_stl = QPushButton("Export STL...")
         self.btn_export_stl.setToolTip(
-            "Write the current mesh as binary STL (mm units).")
+            "Write the current mesh as binary STL in metres, GUI frame\n"
+            "(x streamwise, y up, z span), as used by the Aero Analysis tab.")
         self.btn_export_stl.clicked.connect(self.export_stl_dialog)
         layout.addWidget(self.btn_export_stl, row, 0)
         self.btn_export_step = QPushButton("Export STEP...")
         self.btn_export_step.setToolTip(
-            "Write the current mesh as a CAD-grade STEP file via\n"
-            "cadquery (BREP solid, mm units).")
+            "Write the current mesh as a STEP solid via cadquery\n"
+            "(faceted BREP, millimetres, GUI frame: x streamwise, y up, z span).")
         self.btn_export_step.clicked.connect(self.export_step_dialog)
         layout.addWidget(self.btn_export_step, row, 1); row += 1
 
@@ -1691,10 +1692,15 @@ class GVWDWaveriderTab(QWidget):
             self, "Export STL", "gvwd_geometry.stl", "STL Files (*.stl)")
         if not path: return
         try:
-            write_stl(self.full_mesh, path,
+            from geometry_export import span_frame_to_gui
+
+            # GVWD meshes are x streamwise, y span, z up; the GUI and PySAGAS
+            # use y up, z span.
+            write_stl(span_frame_to_gui(self.full_mesh), path,
                         header=f"gvwd-export {self.current_mode}")
             QMessageBox.information(self, "Saved",
-                                      f"STL written:\n{path}")
+                                      f"STL written:\n{path}\n\n"
+                                      "Units: METRES; frame x streamwise, y up, z span")
         except Exception as e:
             QMessageBox.critical(self, "Export failed", f"{type(e).__name__}: {e}")
 
@@ -1707,9 +1713,12 @@ class GVWDWaveriderTab(QWidget):
             "STEP Files (*.step *.stp)")
         if not path: return
         try:
-            write_step(self.full_mesh, path)
+            from geometry_export import span_frame_to_gui
+
+            write_step(span_frame_to_gui(self.full_mesh), path)       # scale 1000: mm
             QMessageBox.information(self, "Saved",
-                                      f"STEP written:\n{path}")
+                                      f"STEP written:\n{path}\n\n"
+                                      "Units: MILLIMETRES; frame x streamwise, y up, z span")
         except CadqueryUnavailableError as e:
             QMessageBox.critical(self, "STEP export unavailable",
                                   f"cadquery is required for STEP export.\n{e}")

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 
 from .config import PAPER_REFERENCE_GEOMETRY
 from .distributions import shock_curve, upper_surface_trailing_edge
@@ -300,7 +302,7 @@ class Liu2019Waverider:
         dY = Y_u - Y_l                       # chord thickness per (i, j)
         dx = np.diff(X_u, axis=0)            # (n_x-1, n_z)
         col_area = (0.5 * (dY[:-1, :] + dY[1:, :]) * dx).sum(axis=0)  # (n_z,)
-        half_vol = abs(np.trapz(col_area, x=z_LE))
+        half_vol = abs(np.trapezoid(col_area, x=z_LE))
         return float(2.0 * half_vol)
 
     def wetted_area(self):
@@ -396,10 +398,13 @@ class Liu2019Waverider:
                 offset += nx * nz
         return filepath
 
-    def export_step(self, filepath, mirror: bool = True):
+    def export_step(self, filepath, mirror: bool = True, scale: float = 1.0):
         """STEP export via the OCP (pythonocc-core) kernel.
 
-        Raises RuntimeError if OCP is not importable in the environment.
+        OCCT writes STEP lengths in millimetres, so pass ``scale=1000`` to get
+        a body of its true size in CAD (the geometry is in metres). The fit and
+        sewing tolerances scale with it. Raises RuntimeError if OCP is not
+        importable in the environment.
         """
         try:
             from OCP.gp import gp_Pnt
@@ -436,15 +441,15 @@ class Liu2019Waverider:
             # 5 mm is well below the geometry's natural ~10 mm panel pitch
             # and below any feature you'd resolve in CFD or 3D printing.
             surf = GeomAPI_PointsToBSplineSurface(
-                pts, 3, 5, GeomAbs_Shape.GeomAbs_C2, 5.0e-3).Surface()
-            return BRepBuilderAPI_MakeFace(surf, 1.0e-3).Face()
+                pts, 3, 5, GeomAbs_Shape.GeomAbs_C2, 5.0e-3 * scale).Surface()
+            return BRepBuilderAPI_MakeFace(surf, 1.0e-3 * scale).Face()
 
-        X_u, Y_u, Z_u = self.upper_surface(mirror=mirror)
-        X_l, Y_l, Z_l = self.lower_surface(mirror=mirror)
+        X_u, Y_u, Z_u = (a * scale for a in self.upper_surface(mirror=mirror))
+        X_l, Y_l, Z_l = (a * scale for a in self.lower_surface(mirror=mirror))
         f_upper = _bspline_face(X_u, Y_u, Z_u)
         f_lower = _bspline_face(X_l, Y_l, Z_l)
 
-        sewer = BRepBuilderAPI_Sewing(1.0e-3)
+        sewer = BRepBuilderAPI_Sewing(1.0e-3 * scale)
         sewer.Add(f_upper)
         sewer.Add(f_lower)
         sewer.Perform()

@@ -13,6 +13,8 @@ Key components:
 """
 
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 import multiprocessing as mp
 import os
 import sys
@@ -799,7 +801,7 @@ def calculate_volume(wr: WaveriderGenerator) -> float:
     try:
         half_volume = np.trapezoid(areas, x_positions)
     except AttributeError:
-        half_volume = np.trapz(areas, x_positions)
+        half_volume = np.trapezoid(areas, x_positions)
 
     # Full volume (symmetric waverider - multiply by 2)
     return 2.0 * abs(half_volume)

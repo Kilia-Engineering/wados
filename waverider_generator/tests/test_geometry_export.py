@@ -105,3 +105,64 @@ def test_step_reimports_as_one_valid_solid(tmp_path, pswr_streams):
     solids = cq.importers.importStep(str(path)).solids().vals()
     assert len(solids) == 1 and solids[0].isValid()
     assert solids[0].Volume() / 1e9 == pytest.approx(vol, rel=1e-5)     # mm^3 -> m^3
+
+
+# ---------------------------------------------------------------------------
+#  GVWD frame conversion, Liu 2019 / MFOF closed export, NumPy 2 compatibility
+# ---------------------------------------------------------------------------
+
+def test_gvwd_mesh_converted_to_gui_frame_keeps_outward_normals():
+    from gvwd.io.config import EngineeringFlatConfig, GVWDRunConfig, build_geometry
+    from geometry_export import span_frame_to_gui
+
+    m = build_geometry(GVWDRunConfig(geometry=EngineeringFlatConfig())).mesh
+    g = span_frame_to_gui(m)
+    assert np.array_equal(g.vertices[:, 1], m.vertices[:, 2])          # y_gui = z_gvwd (up)
+    assert np.array_equal(g.vertices[:, 2], m.vertices[:, 1])          # z_gui = y_gvwd (span)
+    _, vol_m = _closed_and_volume(m)
+    closed, vol_g = _closed_and_volume(g)
+    assert closed and vol_g == pytest.approx(vol_m) and vol_g > 0.0
+
+
+def test_select_stations_keeps_ends():
+    from geometry_export import select_stations
+
+    st = [np.full((2, 3), float(i)) for i in range(10)]
+    sel = select_stations(st, 4)
+    assert sel[0][0, 0] == 0.0 and sel[-1][0, 0] == 9.0 and len(sel) == 4
+
+
+@pytest.fixture(scope="module")
+def liu_waverider():
+    from liu2019 import PAPER_PARAMS, build_liu2019_waverider
+
+    return build_liu2019_waverider(PAPER_PARAMS, n_z=60, n_x=40)
+
+
+def test_liu2019_closed_mesh_matches_its_volume(liu_waverider):
+    from geometry_export import grid_to_streams
+
+    S = liu_waverider.surfaces
+    mesh = streams_to_mesh(grid_to_streams(S.X_upper, S.Y_upper, S.Z_upper),
+                           grid_to_streams(S.X_lower, S.Y_lower, S.Z_lower), full_span=True)
+    closed, vol = _closed_and_volume(mesh)
+    assert closed
+    # volume() also exercises the np.trapz -> np.trapezoid fix (NumPy >= 2.4).
+    assert vol == pytest.approx(liu_waverider.volume(), rel=0.02)
+
+
+def test_shadow_waverider_builds_with_current_numpy():
+    from shadow_waverider import ShadowWaverider
+
+    wr = ShadowWaverider(mach=6.0, shock_angle=12.0, poly_coeffs=[-1.0, 0.0, 0.5])
+    assert np.isfinite(wr.planform_area) and wr.volume > 0.0
+
+
+def test_liu2019_bspline_step_has_true_size(tmp_path, liu_waverider):
+    cq = pytest.importorskip("cadquery")
+    from liu2019 import PAPER_PARAMS
+
+    path = tmp_path / "liu.step"
+    liu_waverider.export_step(str(path), scale=1000.0)
+    bb = cq.importers.importStep(str(path)).val().BoundingBox()
+    assert bb.xlen == pytest.approx(1000.0 * PAPER_PARAMS["L_w"], rel=1e-2)
