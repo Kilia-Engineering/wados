@@ -3,7 +3,7 @@
 This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate<N>_*`, which write `docs/ltoc/figures/gate<N>_*.png` and `gate<N>_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 54 passed, ~36 s
+pytest ltoc/tests/ -q        # 66 passed, ~95 s
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -173,9 +173,57 @@ On the R1 shocks the shock curves turn by up to 12° in azimuth between the lead
 
 Step C is exact on planar stream surfaces, so V4 and V5 keep the kernel's second order. On twisted surfaces R1's linear interpolation along the row chord gives an O(h²) error per row, so the body converges at first order. The error is about 1.2e−4 L at 80 points on the worst station (see the `ltoc.ltoc` module docstring and the Gate 3 report).
 
-### Refusals (flag 7; V9 in Phase 4)
+### Refusals (flag 7; see also V9 below)
 
 | Input | Status | Test |
 |---|---|---|
 | FCT point outside the shock at the base plane | `outside_shock`, and the stream-protocol attributes raise "waverider incomplete" | `test_fct_outside_shock_and_concave_shock_are_refused` |
 | Shock cross-section curving away from the body (κ_b < 0) | `concave`, message "... (spec flag 7: refused)" | same |
+
+---
+
+## Phase 4: published cases (`ltoc/forces.py`, R1)
+
+Tests are in `ltoc/tests/test_ltoc_published.py`. Figures and numbers come from `python -m ltoc.examples.gate4_published_cases` (about 4 min). Forces follow R1 Eqs. (19)–(22) with the planform reference area (see the V6/V7 note). Wall pressures are compared with R1's own LTOCs curves, digitised into `ltoc/data/r1_wall_pressure_digitised.json` (about 0.03 in p/p∞ and 0.003 in X or Y). FCT stations are clustered toward the symmetry plane, Y = Y_tip (1 − cos(πu/2)), with 40 points per stream surface.
+
+### V6 and V7: R1 waverider cases I and II, R1 Tables 2 and 3
+
+| Case | Stations | C_L | C_D | L/D | Test |
+|---|---|---|---|---|---|
+| I (Eq. 23, M 6, FCT Z = 0.12): R1 LTOCs | — | 0.2205 | 0.0750 | 2.9378 | |
+| I: this work | 25 | 0.22033 (−0.08 %) | 0.07482 (−0.24 %) | 2.9448 (+0.24 %) | `test_v6_v7_lift_and_drag_match_r1_tables[I]` (1 % target, 0.5 % margin) |
+| I: this work | 97 | 0.22038 (−0.05 %) | 0.07496 (−0.05 %) | 2.9400 (+0.07 %) | example script |
+| I: R1 CFD, for scale | — | 0.2201 (−0.18 %) | 0.0749 (−0.13 %) | 2.9377 | |
+| II (Eq. 25, M 7, FCT Z = 0.25): R1 LTOCs | — | 0.2034 | 0.0648 | 3.1395 | |
+| II: this work | 25 | 0.20288 (−0.26 %) | 0.06454 (−0.40 %) | 3.1434 (+0.12 %) | `test_v6_v7_lift_and_drag_match_r1_tables[II]` |
+| II: this work | 97 | 0.20290 (−0.24 %) | 0.06459 (−0.33 %) | 3.1415 (+0.06 %) | example script |
+| II: R1 CFD, for scale | — | 0.2024 (−0.49 %) | 0.0645 (−0.46 %) | 3.1386 | |
+
+Going from 40 to 80 points per stream surface changes C_L and C_D by less than 0.03 %.
+
+**Reference area.** R1 Eq. (22) says A is "the total wetted area". R1's tables are reproduced with the planform (projected) area of the lower surface. With the wetted area, C_L = 0.1702 and 0.1685 and C_D = 0.0579 and 0.0536: 17–23 % low, with L/D unchanged. This is asserted in `test_r1_coefficients_are_referenced_to_planform_not_wetted_area`. R1 Eq. (19) also leaves out the 1/2 of the quadrilateral area, which cancels in the coefficients.
+
+### Wall pressure: R1 Figs. 23 and 27 (V6, V7) and Fig. 16 (V8)
+
+Deviation of this work from R1's LTOCs curves, in %, as max / rms over each digitised curve:
+
+| Case | Streamwise planes | Crosswise planes | Test |
+|---|---|---|---|
+| V6, Fig. 23 | Y = 0: 0.19 / 0.09; Y = 0.1: 0.90 / 0.20; Y = 0.2: 1.95 / 0.42 | X = 0.80: 1.69 / 0.68; X = 1.20: 1.07 / 0.46; X = 1.60: 0.74 / 0.43 | `test_v6_v7_wall_pressure_matches_r1_figures` (rms < 1.5 %, max < 4 %) |
+| V7, Fig. 27 | Y = 0: 0.16 / 0.09; Y = 0.1: 0.38 / 0.21; Y = 0.2: 1.09 / 0.71 | X = 0.60: 2.06 / 1.21; X = 1.00: 0.65 / 0.31; X = 1.40: 2.57 / 0.92 | same |
+| V8, Fig. 16: test case II shock generator (Eq. 18), streamlines from the shock's upstream edge n = 0 | Y = 0.1: 2.19 / 0.59; Y = 0.2: 3.12 / 1.43; Y = 0.3: 1.51 / 1.16 | X = 0.52: 3.28 / 1.44; X = 1.00: 2.35 / 1.00; X = 1.48: 2.33 / 1.16 | `test_v8_test_case_2_generator_wall_pressure_matches_r1_fig16` (rms < 2 %, max < 4 %) |
+
+The maxima occur on the steep parts of the curves, where 0.003 of position error alone is worth 2–3 % of pressure. R1 reports its own LTOCs-vs-CFD wall-pressure differences as up to 1.4–1.9 %.
+
+### V9: robustness
+
+| Input | Result | Test |
+|---|---|---|
+| Planar shock (β 15°, M 6) with a curved FCT | the wedge-derived waverider: body slope tan θ to 2e−8, p = p₂ to 3e−7, planar stream surfaces. Panel forces C_L = p₂/q and L/D = 1/tan θ to 1e−5 | `test_v9_flat_shock_gives_the_wedge_derived_waverider` |
+| Cross-section curving away from the body (κ_b < 0) | `concave`, "... (spec flag 7: refused)" | `test_fct_outside_shock_and_concave_shock_are_refused` |
+| Cone β 8° at M 6 (below the Mach angle) | `sub_mach`, "... (spec flag 7: refused)" | `test_v9_sub_mach_and_detached_shocks_are_refused` |
+| Cone β 75° at M 3 (beyond detachment) | `detached`, "... (spec flag 7: refused)" | same |
+| Shock extension capped at 0.1 chords | `undetermined`, "... (spec flag 4)" | `test_v9_under_determined_body_is_reported` |
+| B-spline (data) shock ending at the base plane | `undetermined`, "the shock data end at X = ..." (spec flag 4); data are never extrapolated | `test_v9_data_shock_is_never_extrapolated` |
+| B-spline shock with data past the base | same body as the analytic cone to 9e−7 | same |
+| FCT point outside the shock at the base | `outside_shock`; the stream-protocol attributes raise | `test_fct_outside_shock_and_concave_shock_are_refused` |

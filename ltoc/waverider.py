@@ -175,6 +175,20 @@ class LTOCWaverider:
         return write_step(self.mesh(full_span), path)
 
     # ------------------------------------------------------------------
+    #  Inviscid forces (R1 Eqs. 19-22)
+    # ------------------------------------------------------------------
+    def aerodynamics(self, n_streamwise: int = 101, reference: str = "planform"):
+        """Lower-surface lift and drag coefficients (``ltoc.forces.panel_forces``).
+
+        The default planform reference area reproduces R1 Tables 2 and 3; see
+        ``ltoc.forces`` for why it differs from the "wetted area" of R1 Eq. (22).
+        """
+        from .forces import lower_surface_grid, panel_forces
+
+        return panel_forces(lower_surface_grid(self, n_streamwise), self.M_inf, self.gamma,
+                            reference=reference)
+
+    # ------------------------------------------------------------------
     #  Diagnostics (spec section 6)
     # ------------------------------------------------------------------
     def spanwise_residuals(self, fractions: Sequence[float] = (0.25, 0.5, 0.75, 1.0)) -> dict:

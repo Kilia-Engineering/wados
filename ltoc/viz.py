@@ -17,7 +17,7 @@ import matplotlib as mpl
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-__all__ = ["SERIES", "MARKERS", "INK", "INK_2", "GRID", "MESH", "SURFACE",
+__all__ = ["SERIES", "MARKERS", "INK", "INK_2", "GRID", "MESH", "SURFACE", "SEQ_BLUE",
            "style", "new_figure", "save"]
 
 SERIES = ("#2a78d6", "#eb6834", "#1baf7a")      # palette slots 1-3
@@ -27,6 +27,10 @@ INK_2 = "#52514e"                                # secondary text, guides
 GRID = "#d9d8d4"
 MESH = "#9d9c97"
 SURFACE = "#fcfcfb"
+#: Sequential (magnitude) ramp: the palette's single blue hue, light -> dark, steps 100-700.
+SEQ_BLUE_STEPS = ("#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5",
+                  "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b")
+SEQ_BLUE = mpl.colors.LinearSegmentedColormap.from_list("ltoc_seq_blue", SEQ_BLUE_STEPS)
 
 _RC = {
     "font.size": 14,

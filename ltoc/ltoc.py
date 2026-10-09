@@ -230,6 +230,17 @@ def step_c(curve: ShockCurve, sol: MOCSolution, rho_ratio: np.ndarray,
     return P3, V3, n_fallback
 
 
+def _slice_curve(curve: ShockCurve, k: int) -> ShockCurve:
+    """The first k points of a shock curve."""
+    from dataclasses import fields, replace
+
+    g = curve.geometry
+    geo = replace(g, **{f.name: getattr(g, f.name)[:k] for f in fields(g)})
+    return replace(curve, x=curve.x[:k], uv=curve.uv[:k], geometry=geo, y=curve.y[:k],
+                   y_axis=curve.y_axis[:k], in_domain=curve.in_domain[:k],
+                   flags={key: v[:k] for key, v in curve.flags.items()})
+
+
 def _truncate_body(sol: MOCSolution, P3, V3, x_base: float) -> BodyLine:
     col = sol.streamline_column(0)
     k = col.x.size
@@ -282,13 +293,16 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
 
     if extension is None:
         from .shock_geometry import local_geometry
-        from gvwd.thermo.oblique_shock import rankine_hugoniot
+        from gvwd.thermo.oblique_shock import detachment_beta, rankine_hugoniot
 
         b0 = float(local_geometry(surface, le_uv[0], le_uv[1], L_ref).beta)
-        rh = rankine_hugoniot(M_inf, b0, 1.0, 1.0, gamma)
-        th, mu = rh["theta"], np.arcsin(1.0 / rh["M2"])
-        est = (np.tan(b0) - np.tan(th)) / max(np.tan(th + mu) - np.tan(b0), 1e-6)
-        extension = float(np.clip(1.2 * est, 0.3, 0.8 * max_extension))
+        if np.arcsin(1.0 / M_inf) < b0 < detachment_beta(M_inf, gamma):
+            rh = rankine_hugoniot(M_inf, b0, 1.0, 1.0, gamma)
+            th, mu = rh["theta"], np.arcsin(1.0 / rh["M2"])
+            est = (np.tan(b0) - np.tan(th)) / max(np.tan(th + mu) - np.tan(b0), 1e-6)
+            extension = float(np.clip(1.2 * est, 0.3, 0.8 * max_extension))
+        else:
+            extension = float(min(0.3, max_extension))   # refused by the flag check below
     ext = extension
     n_solves = 0
     while True:
@@ -296,6 +310,18 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
         n_steps = int(np.ceil(n_points * (x_end - le_point[0]) / chord))
         curve = trace_shock_curves(surface, le_uv[0], le_uv[1], x_end, n_steps=n_steps,
                                    M_inf=M_inf, gamma=gamma, length_scale=L_ref)[0]
+        data_end = None
+        if not getattr(surface, "analytic", True) and not curve.in_domain.all():
+            # A data surface is never extrapolated: stop the shock curve where the data end.
+            k = int(np.argmax(~curve.in_domain))
+            data_end = float(curve.x[max(k - 1, 0)])
+            curve = _slice_curve(curve, k)
+            if k < 3 or data_end < x_base - 1.5 * chord / n_points:
+                res.status = "outside_shock"
+                res.message = (f"the shock data end at X = {data_end:.6g}, before the base plane "
+                               f"X = {x_base:.6g}")
+                res.curve = curve
+                return res
         for flag, text in (("sub_mach", "shock angle at or below the Mach angle"),
                            ("detached", "shock angle beyond detachment"),
                            ("concave", "concave shock cross-section (kappa_b < 0)")):
@@ -311,7 +337,7 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
             il = shock_initial_line(curve.x, curve.y, g.beta, M_inf, gamma)
             sol = solve_inverse(il, AxisRule.noncoaxial(curve.x, curve.y - r), gamma,
                                 scheme="streamline", x_stop=x_base)
-        except MOCError as e:
+        except (MOCError, ValueError) as e:
             res.status, res.message, res.curve = "moc_error", str(e), curve
             return res
         n_solves += 1
@@ -323,6 +349,13 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
             res.status = "limit_surface" if f and f["code"] == 4 else "moc_failure"
             res.message = (f"body streamline stops at X = {col.x[-1]:.6g} before the base: "
                            f"{col.stop_reason}" + (f" (first failure at X = {f['x']:.6g})" if f else ""))
+            res.curve, res.moc = curve, sol
+            return res
+        if data_end is not None:
+            res.status = "undetermined"
+            res.message = (f"the shock data end at X = {data_end:.6g}, but the body is not determined "
+                           f"up to the base plane from them (spec flag 4: extend the shock surface "
+                           f"past the base plane)")
             res.curve, res.moc = curve, sol
             return res
         x_le = float(le_point[0])
@@ -342,7 +375,9 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
     # Determinacy (spec flag 4): the body point of mesh row d depends on shock
     # points 0..d, so the shock was needed up to the row where the body passes
     # the base plane.
-    x_needed = float(curve.x[min(sol.x.shape[0] - 1, curve.x.size - 1)])
+    d_needed = min(sol.x.shape[0] - 1, curve.x.size - 1)
+    x_needed = float(curve.x[d_needed])
+    outside = ~curve.in_domain[:d_needed + 1]
     # Step C consistency: angle between the body velocity and the tangent of
     # the 3-D body streamline (central differences, interior points).
     Pb, Vb = body.points[:-1], body.velocity[:-1]
@@ -358,6 +393,7 @@ def solve_stream_surface(surface: ShockSurface, le_uv, x_base: float, M_inf: flo
     res.diagnostics = {
         "extension_chords": float(ext),
         "extension_needed_chords": (x_needed - x_base) / chord,
+        "shock_beyond_nominal_range": bool(outside.any()),
         "moc_solves": n_solves,
         "beta_deg": (float(np.degrees(g.beta.min())), float(np.degrees(g.beta.max()))),
         "r_min": float(np.min(r)),

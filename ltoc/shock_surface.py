@@ -62,10 +62,18 @@ class SurfaceDerivatives:
 
 
 class ShockSurface(ABC):
-    """Parametric shock surface ``S(u, v)``; X is the freestream direction."""
+    """Parametric shock surface ``S(u, v)``; X is the freestream direction.
+
+    ``analytic`` is True when ``evaluate`` is a closed form that stays valid
+    outside the nominal ``(u_range, v_range)``. The LTOCs core may then
+    extend the shock past the base plane as spec flag 4 requires (R3
+    Sec. 1.4 does the same). A data surface (``BSplineShock``) is not
+    analytic, so a stream surface that needs it beyond its data is refused.
+    """
 
     u_range: Tuple[float, float]
     v_range: Tuple[float, float]
+    analytic: bool = True
 
     @abstractmethod
     def evaluate(self, u, v) -> SurfaceDerivatives:
@@ -250,6 +258,8 @@ class BSplineShock(ShockSurface):
     parameters ``u`` (nu,) and ``v`` (nv,). Each coordinate is a
     ``scipy.interpolate.RectBivariateSpline`` with ``s = 0``.
     """
+
+    analytic = False                    # data: no extension beyond (u_range, v_range)
 
     def __init__(self, u, v, points):
         from scipy.interpolate import RectBivariateSpline
