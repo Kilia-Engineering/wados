@@ -3,7 +3,7 @@
 This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate<N>_*`, which write `docs/ltoc/figures/gate<N>_*.png` and `gate<N>_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 66 passed, ~95 s
+pytest ltoc/tests/ -q        # 84 passed, ~2 min (the 5 GUI tests need PyQt5 and are skipped in CI)
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -227,3 +227,20 @@ The maxima occur on the steep parts of the curves, where 0.003 of position error
 | B-spline (data) shock ending at the base plane | `undetermined`, "the shock data end at X = ..." (spec flag 4); data are never extrapolated | `test_v9_data_shock_is_never_extrapolated` |
 | B-spline shock with data past the base | same body as the analytic cone to 9e−7 | same |
 | FCT point outside the shock at the base | `outside_shock`; the stream-protocol attributes raise | `test_fct_outside_shock_and_concave_shock_are_refused` |
+
+---
+
+## Phase 5: integration (`ltoc/design.py`, `ltoc_waverider_tab.py`)
+
+Tests are in `ltoc/tests/test_ltoc_design.py` (CI) and `ltoc/tests/test_ltoc_gui.py` (offscreen Qt; skipped without PyQt5).
+
+| Check | Result | Test |
+|---|---|---|
+| Every preset (R1 cases I, II, test case II, cone) builds a closed waverider with planform-referenced forces, GUI-frame plotting data and per-station progress | yes | `test_every_preset_builds_a_closed_waverider` |
+| GUI defaults are the configuration that reproduces R1 Tables 2 and 3 (25 clustered stations, 40 points) | same FCT to 1e−15 | `test_gui_defaults_are_the_configuration_validated_against_r1_tables` |
+| Invalid inputs (FCT outside the shock, subsonic, too few stations, degenerate shock) rejected before solving | `ValueError` with the reason | `test_invalid_inputs_are_rejected_before_solving` |
+| Refused stations reported, no geometry built | statuses and flag messages in the summary | `test_refused_stations_are_reported_and_no_geometry_is_built` |
+| Build cancellable from the progress callback | `LTOCError("cancelled")` | `test_build_can_be_cancelled_from_the_progress_callback` |
+| OC-design import reproduces the OC waverider | LE to 1e−9; lower surface within the OC generator's accuracy (V5) | `test_oc_design_import_reproduces_the_oc_waverider` |
+| Tab: presets fill inputs; editing makes a custom shock; background run fills the views; refusals listed with exports disabled; OC import without a design gives an input error | yes | `test_ltoc_gui.py` (4 tests) |
+| Aero Analysis mesh dialog offers the LTOCs waverider and returns its STL; unchanged without an LTOCs tab | yes; the STL reads in meshio (PySAGAS) and numpy-stl | `test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider` |

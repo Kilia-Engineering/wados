@@ -4,7 +4,7 @@ Method: Zheng, X., Hu, Z., Li, Y., Zhu, C., You, Y., Song, W., "Local-Turning
 Osculating Cones Method for Waverider Design," AIAA Journal 58(8):3499-3513,
 2020, doi:10.2514/1.J059139 (R1). Spec: ``docs/ltoc/LTOC_implementation_spec.md``.
 
-Status (Phase 4):
+Status (Phase 5, complete):
 * the two-family rotational inverse MOC kernel with a pluggable axis rule
   (``ltoc.moc_noncoaxial``) and its conical-flow reference
   (``ltoc.reference``);
@@ -14,9 +14,9 @@ Status (Phase 4):
   (``ltoc.ltoc``), and the waverider assembly with the WADOS stream
   protocol and STL/STEP export (``ltoc.waverider``);
 * inviscid lower-surface forces (R1 Eqs. 19-22) and wall-pressure sections
-  (``ltoc.forces``), validated against R1's published cases.
-
-The GUI tab (Phase 5) follows.
+  (``ltoc.forces``), validated against R1's published cases;
+* the Qt-free design layer of the GUI tab (``ltoc.design``); the tab is
+  ``ltoc_waverider_tab.py`` and the user guide ``docs/ltoc/user_guide.md``.
 
 Meridian-plane frame used by the kernel: x along the freestream, y
 transverse; the intrinsic mapping (Gate 0 decision) keeps ``x = X`` and
@@ -59,6 +59,7 @@ from .forces import (  # noqa: F401
     streamwise_section,
     crosswise_section,
 )
+from .design import EllipticShock, LTOCDesign, LTOCResult, PRESETS  # noqa: F401
 
 __all__ = [
     "SCHEMES",
@@ -93,4 +94,8 @@ __all__ = [
     "panel_forces",
     "streamwise_section",
     "crosswise_section",
+    "EllipticShock",
+    "LTOCDesign",
+    "LTOCResult",
+    "PRESETS",
 ]

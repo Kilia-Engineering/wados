@@ -52,11 +52,15 @@ class LTOCWaverider:
         Raise ``LTOCError`` as soon as a stream surface fails. Otherwise the
         failure is recorded in ``stations`` and ``ok`` is False; the
         stream-protocol attributes then raise.
+    progress : callable, optional
+        ``progress(done, total)`` after every station (for GUI progress
+        bars). Returning False cancels the build with ``LTOCError``.
     """
 
     def __init__(self, shock: ShockSurface, fct_yz, x_base: float, M_inf: float, *,
                  gamma: float = 1.4, n_points: int = 80, n_streamwise: Optional[int] = None,
-                 to_gui: Callable = identity_frame, strict: bool = False, label: str = "ltoc"):
+                 to_gui: Callable = identity_frame, strict: bool = False, label: str = "ltoc",
+                 progress: Optional[Callable] = None):
         self.shock = shock
         self.fct_yz = np.atleast_2d(np.asarray(fct_yz, dtype=float))
         self.x_base = float(x_base)
@@ -67,10 +71,10 @@ class LTOCWaverider:
         self.to_gui = to_gui
         self.label = label
         self.stations: list[StreamSurface] = []
-        self._build(strict)
+        self._build(strict, progress)
 
     # ------------------------------------------------------------------
-    def _build(self, strict: bool) -> None:
+    def _build(self, strict: bool, progress: Optional[Callable] = None) -> None:
         uv, le_pts, converged = find_leading_edge(self.shock, self.fct_yz)
         self.le_uv, self.le_points_native = uv, le_pts
         for k in range(self.fct_yz.shape[0]):
@@ -86,6 +90,8 @@ class LTOCWaverider:
             if strict and not st.ok:
                 raise LTOCError(f"station {k}: {st.status}: {st.message}")
             self.stations.append(st)
+            if progress is not None and progress(k + 1, self.fct_yz.shape[0]) is False:
+                raise LTOCError("cancelled")
 
     @property
     def ok(self) -> bool:
