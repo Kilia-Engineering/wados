@@ -1,9 +1,9 @@
 # LTOCs validation record
 
-This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate1_moc_kernel`, which writes `docs/ltoc/figures/gate1_*.png` and `gate1_results.json`.
+This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate<N>_*`, which write `docs/ltoc/figures/gate<N>_*.png` and `gate<N>_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 44 passed, ~30 s
+pytest ltoc/tests/ -q        # 54 passed, ~36 s
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -126,3 +126,56 @@ Tests are in `ltoc/tests/test_shock_geometry.py`. Figures and numbers come from 
 | R1 Eqs. (18), (23), (25): convex, attached, above the Mach angle along the shock curves | no flags raised | `test_published_r1_shocks_are_convex_and_attached` |
 | R2 Eq. (13) quartic shock: κ_b > 0 (centres on the body side) | yes | `test_r2_quartic_shock_curvature_is_positive_toward_the_body` |
 | R1 Eq. (25): the shock curves turn (azimuth drift) and the axis centres drift | 12° and 0.46 at most | `test_shock_curves_turn_on_elliptic_shocks` |
+
+---
+
+## Phase 3: LTOCs core (`ltoc/ltoc.py`, `ltoc/waverider.py`)
+
+Tests are in `ltoc/tests/test_ltoc_core.py`. Figures and numbers come from `python -m ltoc.examples.gate3_ltoc_core` (about 2 min). Deviations are divided by the waverider length L. "40 points" means 40 shock points from the leading edge to the base plane.
+
+### Leading edge and Step C identities
+
+| Check | Reference | Worst error | Test |
+|---|---|---|---|
+| FCT projected onto the shock (R1 Sec. IV.A), R1 Eq. (25) shock | the point lies on the FCT line | 1e−12 | `test_leading_edge_projection_lies_on_shock_and_fct` |
+| Cone: each stream surface stays in its meridian plane (Step C, R1 Eqs. 10–11) | azimuth constant | < 1e−12 rad | `test_step_c_on_cone_keeps_stream_surface_in_meridian_plane` |
+| Cone: 3-D distance to the axis equals the meridian radius y − y_axis | coaxial meridian | < 1e−12 | same |
+| Cone: R1's X-component scaling of j never ill-conditioned | `stepc_fallbacks` = 0 | 0 | same |
+
+### V4: cone-derived waverider (cone shock, M 6, β 12°, 11 stations)
+
+| Check | Reference | Worst deviation / L | Criterion | Test |
+|---|---|---|---|---|
+| Body streamlines, 40 points | tight Taylor–Maccoll streamline (`ConicalFlowReference.streamline`) | 1.8e−7 | 1e−4 | `test_v4_cone_waverider_matches_taylor_maccoll` |
+| Body streamlines, 40 points | `ShadowWaverider` lower surface | 4.1e−7 | 1e−4 | `test_v4_cone_waverider_matches_shadow_waverider` |
+| Convergence, n = 20, 40, 80, 160 | Taylor–Maccoll | 7.3e−7, 1.8e−7, 4.6e−8, 1.1e−8 (order 2.0) | — | example script |
+
+### V5: osculating-cone waverider (WADOS OC design, M 5, β 15°, 10 planes)
+
+| Check | Reference | Worst deviation / L | Criterion | Test |
+|---|---|---|---|---|
+| Body streamlines, 40 points | exact per-plane flow: Taylor–Maccoll in each local cone, wedge flow where the shock is flat (`osculating_cone_streamline`) | 8.8e−7 | 1e−4 | `test_v5_oc_waverider_matches_tight_reference` |
+| Body streamlines, 40 points | OC generator's `lower_surface_streams` | 9.0e−4 | equals the OC generator's own error (next row) to 1e−5 | `test_v5_oc_waverider_matches_oc_generator_within_its_accuracy` |
+| OC generator against the exact per-plane flow | — | 9.0e−4 (its cone angle is 9.2276° against 9.2318°: default `solve_ivp` tolerances in `waverider_generator/flowfield.py`) | — | same |
+| Convergence, n = 20, 40, 80 | exact per-plane flow | 3.5e−6, 8.8e−7, 2.2e−7 (order 2.0) | — | example script |
+| Stream protocol: equal-length streams, station 0 on z = 0, upper surface ends at the base; full-span mesh closed; STL size | — | exact | — | `test_stream_protocol_and_closed_stl` |
+
+### Twisted stream surfaces (R1 case II shock, Eq. 25, M 7, FCT Z = 0.25)
+
+On the R1 shocks the shock curves turn by up to 12° in azimuth between the leading edge and the base, so the stream surfaces are not planar. There is no exact reference, so these checks use self-convergence and a consistency test.
+
+| Check | Result | Test |
+|---|---|---|
+| Step C velocity tangent to the 3-D body streamline (max angle, station 0.3 / 0.6), n = 20 → 160 | 0.090° → 0.011° / 0.032° → 0.0042°, first order | `test_step_c_on_twisted_stream_surface_is_consistent_and_first_order` |
+| Base-plane body point, \|P(n) − P(2n)\| / L, station 0.3, n = 20, 40, 80 | 2.4e−4, 1.2e−4, 6.1e−5: first order | same |
+| Same, station 0.6 | 4.0e−5, 2.0e−5, 1.0e−5: first order | example script |
+| Determinacy (flag 4): shock extension needed ≤ extension used | yes, all stations of cases I and II | same, and example script |
+
+Step C is exact on planar stream surfaces, so V4 and V5 keep the kernel's second order. On twisted surfaces R1's linear interpolation along the row chord gives an O(h²) error per row, so the body converges at first order. The error is about 1.2e−4 L at 80 points on the worst station (see the `ltoc.ltoc` module docstring and the Gate 3 report).
+
+### Refusals (flag 7; V9 in Phase 4)
+
+| Input | Status | Test |
+|---|---|---|
+| FCT point outside the shock at the base plane | `outside_shock`, and the stream-protocol attributes raise "waverider incomplete" | `test_fct_outside_shock_and_concave_shock_are_refused` |
+| Shock cross-section curving away from the body (κ_b < 0) | `concave`, message "... (spec flag 7: refused)" | same |

@@ -343,17 +343,26 @@ def _lagrange(nodes, x):
     return vals, ders
 
 
+def _cubic_basis(nodes, w, x):
+    """Values and derivatives of the 4-node Lagrange basis (``w`` = barycentric weights)."""
+    d0, d1, d2, d3 = (x - nodes[0], x - nodes[1], x - nodes[2], x - nodes[3])
+    vals = (d1 * d2 * d3 * w[0], d0 * d2 * d3 * w[1], d0 * d1 * d3 * w[2], d0 * d1 * d2 * w[3])
+    ders = ((d2 * d3 + d1 * d3 + d1 * d2) * w[0], (d2 * d3 + d0 * d3 + d0 * d2) * w[1],
+            (d1 * d3 + d0 * d3 + d0 * d1) * w[2], (d1 * d2 + d0 * d2 + d0 * d1) * w[3])
+    return vals, ders
+
+
 def _row_foot(row, seg, xP, yP, lam):
     """Foot of the line through P (slope ``lam``) on the curve of a known row.
 
     ``row`` holds the row arrays (x, y, th, p, ...), NaN where invalid. Near
     segment ``seg`` the row is represented by a cubic through four
-    neighbouring points (in ``x``). A quadratic leaning toward the foot is used
-    at the row ends, and a straight line for two-point rows. The line is
-    intersected with that curve (Newton from the chord intersection), and all
-    fields are interpolated with the same stencil. Linear interpolation would
-    add an O(h^2) error at every step, which accumulates to first order
-    overall.
+    consecutive valid points (in ``x``), centred on the segment where
+    possible. Rows or stretches with fewer valid points use a quadratic or a
+    straight line. The line is intersected with that curve (Newton from the
+    chord intersection), and all fields are interpolated with the same
+    stencil. Linear interpolation would add an O(h^2) error at every step,
+    which accumulates to first order overall.
 
     Returns ``(foot_state, t)``. ``foot_state`` holds every field of ``row`` at
     the foot. ``t`` is the chord parameter on ``seg`` (0 at ``seg``, 1 at
@@ -363,33 +372,68 @@ def _row_foot(row, seg, xP, yP, lam):
     n = rx.size
     s = np.clip(seg, 0, n - 2)
     t = _segment_param(rx[s], ry[s], rx[s + 1], ry[s + 1], xP, yP, lam)
-    fin = lambda i: (i >= 0) & (i <= n - 1) & np.isfinite(rx[np.clip(i, 0, n - 1)])
-    has_l, has_r = fin(s - 1), fin(s + 2)
-    cubic = has_l & has_r
-    quad_l = ~cubic & has_l
-    quad_r = ~cubic & ~has_l & has_r
-
+    finite = np.isfinite(rx)
     out = [rx[s] + t * (rx[s + 1] - rx[s])]
     out += [f[s] + t * (f[s + 1] - f[s]) for f in row[1:]]
-    for mask, offs in ((cubic, (-1, 0, 1, 2)), (quad_l, (-1, 0, 1)), (quad_r, (0, 1, 2))):
-        if not mask.any():
-            continue
-        ii = np.flatnonzero(mask)
-        idx = [np.clip(s[ii] + o, 0, n - 1) for o in offs]
-        nodes = [rx[i] for i in idx]
-        yn = [ry[i] for i in idx]
-        xF = out[0][ii]
-        yPi, xPi, lami = yP[ii], xP[ii], lam[ii]
-        with np.errstate(invalid="ignore", divide="ignore"):
-            for _ in range(4):                        # Newton on the row curve
+    done = np.zeros(s.shape, dtype=bool)
+
+    def ok_stencil(start, k):
+        idx = start[:, None] + np.arange(k)[None, :]
+        good = (start >= 0) & (start + k - 1 <= n - 1)
+        idxc = np.clip(idx, 0, n - 1)
+        return good & np.all(finite[idxc], axis=1), idxc
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # Cubic: centred start s-1, else s, else s-2.
+        for start in (s - 1, s, s - 2):
+            if done.all():
+                break
+            good, idx = ok_stencil(start, 4)
+            sel = good & ~done
+            if not sel.any():
+                continue
+            ii = np.flatnonzero(sel)
+            I = idx[ii]
+            nodes = [rx[I[:, k]] for k in range(4)]
+            w = [1.0 / np.prod([nodes[a] - nodes[b] for b in range(4) if b != a], axis=0)
+                 for a in range(4)]
+            yn = [ry[I[:, k]] for k in range(4)]
+            xF = out[0][ii]
+            yPi, xPi, lami = yP[ii], xP[ii], lam[ii]
+            for _ in range(2):          # Newton on the row curve; chord start is O(h^2)
+                b, db = _cubic_basis(nodes, w, xF)
+                g = b[0] * yn[0] + b[1] * yn[1] + b[2] * yn[2] + b[3] * yn[3] - yPi - lami * (xF - xPi)
+                dg = db[0] * yn[0] + db[1] * yn[1] + db[2] * yn[2] + db[3] * yn[3] - lami
+                xF = xF - g / dg
+            b, _ = _cubic_basis(nodes, w, xF)
+            out[0][ii] = xF
+            for fi, f in enumerate(row[1:], start=1):
+                out[fi][ii] = b[0] * f[I[:, 0]] + b[1] * f[I[:, 1]] + b[2] * f[I[:, 2]] + b[3] * f[I[:, 3]]
+            done |= sel
+        # Quadratic fallback near invalid points or in short rows.
+        for start in (s - 1, s):
+            if done.all():
+                break
+            good, idx = ok_stencil(start, 3)
+            sel = good & ~done
+            if not sel.any():
+                continue
+            ii = np.flatnonzero(sel)
+            I = idx[ii]
+            nodes = [rx[I[:, k]] for k in range(3)]
+            yn = [ry[I[:, k]] for k in range(3)]
+            xF = out[0][ii]
+            yPi, xPi, lami = yP[ii], xP[ii], lam[ii]
+            for _ in range(2):
                 b, db = _lagrange(nodes, xF)
                 g = sum(bi * yi for bi, yi in zip(b, yn)) - yPi - lami * (xF - xPi)
                 dg = sum(di * yi for di, yi in zip(db, yn)) - lami
                 xF = xF - g / dg
-        b, _ = _lagrange(nodes, xF)
-        out[0][ii] = xF
-        for fi, f in enumerate(row[1:], start=1):
-            out[fi][ii] = sum(bi * f[i] for bi, i in zip(b, idx))
+            b, _ = _lagrange(nodes, xF)
+            out[0][ii] = xF
+            for fi, f in enumerate(row[1:], start=1):
+                out[fi][ii] = sum(bi * f[I[:, k]] for k, bi in enumerate(b))
+            done |= sel
     return tuple(out), t
 
 
@@ -772,7 +816,8 @@ class MOCSolution:
 def solve_inverse(initial: InitialLine, rule: AxisRule, gamma: float = 1.4, *,
                   scheme: str = "streamline", n_rows: Optional[int] = None,
                   strict: bool = False, tol: float = 1e-10, max_iter: int = 60,
-                  extrapolation_limit: float = 3.0) -> MOCSolution:
+                  extrapolation_limit: float = 3.0,
+                  x_stop: Optional[float] = None) -> MOCSolution:
     """March inward from ``initial`` with the chosen scheme.
 
     Parameters
@@ -799,6 +844,10 @@ def solve_inverse(initial: InitialLine, rule: AxisRule, gamma: float = 1.4, *,
         Predictor-corrector convergence tolerance. Positions are measured
         relative to the local cell size, pressure relatively, and the flow
         angle in radians.
+    x_stop : float, optional
+        Stop marching once the first point of a row (column 0, which for the
+        streamline mesh is the streamline from the first initial point)
+        reaches ``x >= x_stop``. Later rows are not computed.
     extrapolation_limit : float
         ``scheme="characteristic"`` only. A point counts as determined if its
         streamline starts no further upstream of the first initial point than
@@ -897,6 +946,10 @@ def solve_inverse(initial: InitialLine, rule: AxisRule, gamma: float = 1.4, *,
         if np.all(bad):
             for dd in range(d + 1, n_rows + 1):
                 ST[dd, : n - dd] = PARENT_INVALID
+            break
+        if x_stop is not None and status[0] == VALID and xP[0] >= x_stop:
+            keep = d + 1
+            X, Y, TH, P, KK, HH, OR, ST = (A[:keep] for A in (X, Y, TH, P, KK, HH, OR, ST))
             break
 
     return MOCSolution(X, Y, TH, P, KK, HH, OR, ST, rule, gamma, scheme)
