@@ -1590,7 +1590,7 @@ class GVWDWaveriderTab(QWidget):
             ev = eta_V(V, S)
             info["Volume"] = f"{V:.4f} m^3"
             info["Planform"] = f"{S:.4f} m^2"
-            info["eta_V"] = f"{ev:.4f}"
+            info["Volumetric Efficiency"] = f"{ev:.4f}"
         except Exception:
             pass
         # On-design aero (if available)
@@ -1642,9 +1642,9 @@ class GVWDWaveriderTab(QWidget):
                 S = planform_area_from_mesh(self.full_mesh)
                 ev = eta_V(V, S)
                 lines.append(f"GEOMETRY  ({self.full_mesh.n_faces} faces)")
-                lines.append(f"  V       = {V:.4f} m^3")
-                lines.append(f"  S_plan  = {S:.4f} m^2")
-                lines.append(f"  eta_V   = {ev:.4f}")
+                lines.append(f"  V                     = {V:.4f} m^3")
+                lines.append(f"  S_plan                = {S:.4f} m^2")
+                lines.append(f"  Volumetric Efficiency = {ev:.4f}")
             except Exception:
                 pass
             if geom_dt is not None:
@@ -1752,7 +1752,8 @@ class GVWDWaveriderTab(QWidget):
         "      in a background QThread; progress bar updates per cell.\n"
         "  Export STL/STEP : write the current geometry mesh to disk.\n\n"
         "READOUTS\n"
-        "  V, S_planform, eta_V : numerical volume + planform + ratio.\n"
+        "  V, S_planform         : numerical volume and planform area.\n"
+        "  Volumetric Efficiency : V^(2/3) / S_planform.\n"
         "  CL, CD_wave, CD_friction, CD_total, L/D : aero breakdown.\n"
         "  Cm                 : pitching moment about mid-chord.\n"
         "  q_LE max           : peak LE stagnation heat flux\n"

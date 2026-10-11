@@ -13,6 +13,12 @@ import numpy as np
 from scipy.spatial import ConvexHull
 
 
+def _cross2(a, b):
+    """z-component of the cross product of two 2-D vectors (NumPy 2 no
+    longer accepts 2-D vectors in np.cross)."""
+    return a[0] * b[1] - a[1] * b[0]
+
+
 def calculate_planform_area_from_waverider(waverider):
     """
     Calculate accurate planform area from waverider geometry.
@@ -58,8 +64,8 @@ def calculate_planform_area_from_waverider(waverider):
             
             # Calculate area of quadrilateral using cross product
             # Split into two triangles
-            area1 = 0.5 * abs(np.cross(p2 - p1, p3 - p1))
-            area2 = 0.5 * abs(np.cross(p3 - p1, p4 - p1))
+            area1 = 0.5 * abs(_cross2(p2 - p1, p3 - p1))
+            area2 = 0.5 * abs(_cross2(p3 - p1, p4 - p1))
             total_area += (area1 + area2)
     
     # This is one half (Z >= 0), so double it for full vehicle
@@ -217,7 +223,7 @@ def _calculate_area_from_stl_manual(stl_filename):
             p3 = np.array([v3[0], v3[2]])
             
             # Area of projected triangle
-            area = 0.5 * abs(np.cross(p2 - p1, p3 - p1))
+            area = 0.5 * abs(_cross2(p2 - p1, p3 - p1))
             total_area += area
             
             # Read attribute byte count (2 bytes, skip)

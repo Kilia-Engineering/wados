@@ -76,6 +76,11 @@ except ImportError:
     NUMPY_STL_AVAILABLE = False
 
 
+
+def _param_label(name):
+    """Axis label for a result column (data keys stay as they are)."""
+    return "Volumetric Efficiency" if name == "vol_efficiency" else name
+
 class ConeWaveriderCanvas(FigureCanvas):
     """Canvas for 3D cone waverider visualization"""
     
@@ -199,7 +204,7 @@ class DesignSpaceCanvas(FigureCanvas):
             alpha=0.7
         )
         
-        self.fig.colorbar(scatter, ax=self.ax, label=color_param)
+        self.fig.colorbar(scatter, ax=self.ax, label=_param_label(color_param))
         
         # Overlay stability regions if available
         if show_stability and 'Stable' in results_df.columns:
@@ -223,9 +228,10 @@ class DesignSpaceCanvas(FigureCanvas):
                            c='gold', s=200, marker='*', edgecolors='black',
                            linewidths=2, label=f'Best {color_param}={best[color_param]:.3f}', zorder=10)
         
-        self.ax.set_xlabel(x_param)
-        self.ax.set_ylabel(y_param)
-        self.ax.set_title(f'Design Space: {color_param} vs ({x_param}, {y_param})')
+        self.ax.set_xlabel(_param_label(x_param))
+        self.ax.set_ylabel(_param_label(y_param))
+        self.ax.set_title(f'Design Space: {_param_label(color_param)} vs '
+                          f'({_param_label(x_param)}, {_param_label(y_param)})')
         self.ax.legend(loc='upper right')
         self.ax.grid(True, alpha=0.3)
         
@@ -1094,35 +1100,35 @@ CONE-DERIVED WAVERIDER SUMMARY
 
 FLOW CONDITIONS
 ---------------
-Mach Number:        {self.waverider.mach:.2f}
-Shock Angle:        {self.waverider.shock_angle:.2f}°
-Cone Angle:         {self.waverider.cone_angle_deg:.2f}°
-Deflection Angle:   {np.degrees(self.waverider.deflection_angle):.2f}°
-Post-shock Mach:    {self.waverider.post_shock_mach:.2f}
+Mach Number:           {self.waverider.mach:.2f}
+Shock Angle:           {self.waverider.shock_angle:.2f}°
+Cone Angle:            {self.waverider.cone_angle_deg:.2f}°
+Deflection Angle:      {np.degrees(self.waverider.deflection_angle):.2f}°
+Post-shock Mach:       {self.waverider.post_shock_mach:.2f}
 
 GEOMETRY (Non-dimensional)
 --------------------------
-Length:             {self.waverider.length:.4f}
-Planform Area:      {self.waverider.planform_area:.4f}
-Volume:             {self.waverider.volume:.6f}
-Vol Efficiency:     {(self.waverider.volume ** (2.0/3.0)) / self.waverider.planform_area if self.waverider.planform_area > 0 else 0:.6f}
-MAC:                {self.waverider.mac:.4f}
-CG Location:        [{self.waverider.cg[0]:.4f}, {self.waverider.cg[1]:.4f}, {self.waverider.cg[2]:.4f}]
+Length:                {self.waverider.length:.4f}
+Planform Area:         {self.waverider.planform_area:.4f}
+Volume:                {self.waverider.volume:.6f}
+Volumetric Efficiency: {(self.waverider.volume ** (2.0/3.0)) / self.waverider.planform_area if self.waverider.planform_area > 0 else 0:.6f}
+MAC:                   {self.waverider.mac:.4f}
+CG Location:           [{self.waverider.cg[0]:.4f}, {self.waverider.cg[1]:.4f}, {self.waverider.cg[2]:.4f}]
 
 GEOMETRY (Scaled by {self.scale_spin.value()})
 --------------------------
-Length:             {refs['length']:.2f}
-Planform Area:      {refs['area']:.2f}
+Length:                {refs['length']:.2f}
+Planform Area:         {refs['area']:.2f}
 
 POLYNOMIAL PARAMETERS
 ---------------------
-Order:              {self.waverider.poly_order}
-Coefficients:       {self.waverider.poly_coeffs}
+Order:                 {self.waverider.poly_order}
+Coefficients:          {self.waverider.poly_coeffs}
 
 MESH
 ----
-Leading Edge Pts:   {self.waverider.n_leading_edge}
-Streamwise Pts:     {self.waverider.n_streamwise}
+Leading Edge Pts:      {self.waverider.n_leading_edge}
+Streamwise Pts:        {self.waverider.n_streamwise}
 
 {'='*60}
 """

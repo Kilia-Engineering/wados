@@ -119,20 +119,21 @@ class VMNCanvas3D(FigureCanvas):
         length = getattr(wr, 'length', 0)
         direction = getattr(wr, 'direction', '')
         lines = [title]
-        lines.append(f"  Ma range       {ma_min:.0f} - {ma_max:.0f}")
-        lines.append(f"  beta           {beta:.1f} deg")
-        lines.append(f"  Direction      {direction}")
-        lines.append(f"  Length          {length:.4f} m")
+        rows = []
+        rows.append(("Ma range", f"{ma_min:.0f} - {ma_max:.0f}"))
+        rows.append(("beta", f"{beta:.1f} deg"))
+        rows.append(("Direction", f"{direction}"))
+        rows.append(("Length", f"{length:.4f} m"))
         if hasattr(wr, 'cone_angles_deg'):
             ca = wr.cone_angles_deg
-            lines.append(f"  Cone angles    {ca.min():.1f} - {ca.max():.1f} deg")
+            rows.append(("Cone angles", f"{ca.min():.1f} - {ca.max():.1f} deg"))
 
         vol = 0.0
         a_plan = 0.0
         try:
             from waverider_gui import calculate_waverider_volume
             vol = calculate_waverider_volume(wr)
-            lines.append(f"  Volume          {vol:.6f} m3")
+            rows.append(("Volume", f"{vol:.6f} m3"))
         except Exception:
             pass
 
@@ -149,14 +150,16 @@ class VMNCanvas3D(FigureCanvas):
                 z_pos.append(s[0, 2])
             if len(chords) > 2:
                 a_plan = float(np.trapezoid(chords, z_pos))
-                lines.append(f"  Planform Area   {a_plan:.6f} m2")
+                rows.append(("Planform Area", f"{a_plan:.6f} m2"))
         except Exception:
             pass
 
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,

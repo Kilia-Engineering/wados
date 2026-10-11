@@ -1254,7 +1254,7 @@ class WaveriderGUI(QMainWindow):
 
         file_menu.addSeparator()
 
-        export_action = QAction("Export CAD...", self)
+        export_action = QAction("Export STEP...", self)
         export_action.setShortcut("Ctrl+E")
         export_action.triggered.connect(self.export_cad)
         file_menu.addAction(export_action)
@@ -2519,7 +2519,7 @@ class WaveriderGUI(QMainWindow):
         generate_btn.setStyleSheet("QPushButton { background-color: #F59E0B; color: #0A0A0A; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #D97706; }")
         button_layout.addWidget(generate_btn)
         
-        export_btn = QPushButton("Export CAD")
+        export_btn = QPushButton("Export STEP")
         export_btn.setToolTip("Export a STEP solid (with the LE blunting / thickness options above)")
         export_btn.clicked.connect(self.export_cad)
         export_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
@@ -3938,7 +3938,7 @@ class WaveriderGUI(QMainWindow):
         filter_str = "STEP files (*.step *.stp);;All files (*)"
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Export waverider",
+            self, "Export waverider as STEP",
             default_name,
             filter_str
         )
@@ -4014,7 +4014,7 @@ class WaveriderGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(
                 self, "Export error",
-                f"Failed to export CAD file:\n\n{str(e)}"
+                f"Failed to export STEP file:\n\n{str(e)}"
             )
             self.info_label.setText(f"Export error: {str(e)}")
 
@@ -4055,7 +4055,7 @@ class WaveriderGUI(QMainWindow):
             note = ""
             if notes:
                 note = ("\n\nThe STL is the sharp generated geometry; "
-                        + ", ".join(notes) + " are applied by 'Export CAD' (STEP) only.")
+                        + ", ".join(notes) + " are applied by 'Export STEP' only.")
             QMessageBox.information(
                 self, "Export successful",
                 f"STL file exported to:\n{filename}\n\n"

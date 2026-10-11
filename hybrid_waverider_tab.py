@@ -141,23 +141,24 @@ class HybridCanvas3D(FigureCanvas):
         width = getattr(wr, 'width', 0)
         height = getattr(wr, 'height', 0)
         lines = [title]
-        lines.append(f"  Mach           {mach:.1f}")
-        lines.append(f"  beta OC        {beta_oc:.1f} deg")
+        rows = []
+        rows.append(("Mach", f"{mach:.1f}"))
+        rows.append(("beta OC", f"{beta_oc:.1f} deg"))
         if abs(beta_cd - beta_oc) > 0.01:
-            lines.append(f"  beta CD        {beta_cd:.1f} deg")
+            rows.append(("beta CD", f"{beta_cd:.1f} deg"))
         if hasattr(wr, 'h0'):
-            lines.append(f"  h root         {wr.h0:.2f}")
-            lines.append(f"  h tip          {wr.h1:.2f}")
+            rows.append(("h root", f"{wr.h0:.2f}"))
+            rows.append(("h tip", f"{wr.h1:.2f}"))
         if hasattr(wr, 'x_t'):
-            lines.append(f"  x_t            {wr.x_t:.2f}")
-            lines.append(f"  dx_t           {wr.dx_t:.2f}")
-        lines.append(f"  Length          {length:.4f} m")
+            rows.append(("x_t", f"{wr.x_t:.2f}"))
+            rows.append(("dx_t", f"{wr.dx_t:.2f}"))
+        rows.append(("Length", f"{length:.4f} m"))
 
         # Volume
         try:
             from waverider_gui import calculate_waverider_volume
             vol = calculate_waverider_volume(wr)
-            lines.append(f"  Volume          {vol:.6f} m³")
+            rows.append(("Volume", f"{vol:.6f} m³"))
         except Exception:
             vol = 0.0
 
@@ -165,15 +166,17 @@ class HybridCanvas3D(FigureCanvas):
         try:
             from reference_area_calculator import calculate_planform_area_from_waverider
             a_plan, _ = calculate_planform_area_from_waverider(wr)
-            lines.append(f"  Planform Area   {a_plan:.6f} m²")
+            rows.append(("Planform Area", f"{a_plan:.6f} m²"))
         except Exception:
             a_plan = 0.0
 
         # Volumetric efficiency: V^(2/3) / A_planform
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,

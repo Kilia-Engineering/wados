@@ -69,7 +69,8 @@ class OptimizationWorker(QThread):
             sim_params = self.config.get('simulation_params', {})
             
             # Log configuration
-            obj_strs = [f"{obj['name']} ({obj['mode']})" for obj in objectives]
+            obj_strs = [f"{'Volumetric Efficiency' if obj['name'] == 'VolEff' else obj['name']} "
+                        f"({obj['mode']})" for obj in objectives]
             self.log_message.emit(f"📊 Objectives: {', '.join(obj_strs)}")
             self.log_message.emit(f"🔒 Constraints: {len(constraints)} active")
             self.log_message.emit(f"🧬 Population: {algorithm_params['pop_size']} designs/generation")

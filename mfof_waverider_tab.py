@@ -159,6 +159,9 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
     and aero are routed through the :mod:`mfof` package.
     """
 
+    _EXPORT_NAME = "MFOF"
+    _EXPORT_STEM = "mfof_waverider"
+
     def __init__(self, parent=None):
         # Pre-create the equivalence-cache attribute so super().__init__'s
         # call to _on_geometry_ready (if any) doesn't AttributeError.
@@ -312,7 +315,7 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
 
         self.generate_btn.setEnabled(False)
         self.run_aero_btn.setEnabled(False)
-        self.export_btn.setEnabled(False)
+        self._set_export_enabled(False)
         self.progress_bar.setVisible(True)
 
         # Hint to the user that power-law takes much longer than cone/wedge

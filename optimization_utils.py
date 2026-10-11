@@ -27,6 +27,14 @@ from typing import List, Dict, Tuple, Optional
 import matplotlib.pyplot as plt
 
 
+# Display names for objective keys whose internal name is an abbreviation
+_OBJ_LABELS = {"VolEff": "Volumetric Efficiency"}
+
+
+def _obj_label(name):
+    return _OBJ_LABELS.get(name, name)
+
+
 class OptimizationResults:
     """
     Manages optimization results storage and analysis.
@@ -321,8 +329,8 @@ class OptimizationResults:
                            alpha=0.2, color='gray', label='Range')
             
             ax.set_xlabel('Generation')
-            ax.set_ylabel(obj_name)
-            ax.set_title(f'{obj_name} Convergence')
+            ax.set_ylabel(_obj_label(obj_name))
+            ax.set_title(f'{_obj_label(obj_name)} Convergence')
             ax.legend()
             ax.grid(True, alpha=0.3)
         
@@ -387,7 +395,7 @@ class OptimizationResults:
         else:
             # Fallback to first objective
             color_metric = objective_names[0]
-            color_label = objective_names[0]
+            color_label = _obj_label(objective_names[0])
         
         # Create figure with extra space for info box
         fig = plt.figure(figsize=(14, 9))
@@ -450,8 +458,8 @@ class OptimizationResults:
         # Axis labels with optimization direction
         dir1 = "minimize ↓" if minimize[0] else "maximize ↑"
         dir2 = "minimize ↓" if minimize[1] else "maximize ↑"
-        ax.set_xlabel(f'{objective_names[0]}  ({dir1})', fontsize=12, fontweight='bold')
-        ax.set_ylabel(f'{objective_names[1]}  ({dir2})', fontsize=12, fontweight='bold')
+        ax.set_xlabel(f'{_obj_label(objective_names[0])}  ({dir1})', fontsize=12, fontweight='bold')
+        ax.set_ylabel(f'{_obj_label(objective_names[1])}  ({dir2})', fontsize=12, fontweight='bold')
         
         # Title
         ax.set_title('Pareto Front - Objective Space', fontsize=14, fontweight='bold', pad=15)
@@ -653,9 +661,9 @@ class OptimizationResults:
         
         # Formatting
         direction = "↓ minimize" if minimize else "↑ maximize"
-        ax.set_xlabel(f'{objective_name} ({direction})', fontsize=12, fontweight='bold')
+        ax.set_xlabel(f'{_obj_label(objective_name)} ({direction})', fontsize=12, fontweight='bold')
         ax.set_ylabel('Geometric Constraint Value\n$X_2 / (1-X_1)^4$', fontsize=12, fontweight='bold')
-        ax.set_title(f'Geometric Constraint vs {objective_name}\n(Similar to Paper Figure 11)',
+        ax.set_title(f'Geometric Constraint vs {_obj_label(objective_name)}\n(Similar to Paper Figure 11)',
                     fontsize=14, fontweight='bold')
         
         # Set axis limits

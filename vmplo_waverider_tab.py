@@ -118,31 +118,32 @@ class VMPLOCanvas3D(FigureCanvas):
 
     def _draw_info_panel(self, wr):
         lines = ['VMPLO WAVERIDER']
+        rows = []
         beta = getattr(wr, 'beta_deg', 0)
         length = getattr(wr, 'length', 0)
-        lines.append(f"  Beta           {beta:.1f} deg")
-        lines.append(f"  Length          {length:.4f} m")
+        rows.append(("Beta", f"{beta:.1f} deg"))
+        rows.append(("Length", f"{length:.4f} m"))
 
         # Mach range
         if hasattr(wr, '_mach_per_station'):
             ma = wr._mach_per_station
-            lines.append(f"  Ma range       {ma.min():.1f} - {ma.max():.1f}")
+            rows.append(("Ma range", f"{ma.min():.1f} - {ma.max():.1f}"))
 
         # Exponent range
         if hasattr(wr, '_n_per_station'):
             n = wr._n_per_station
-            lines.append(f"  n range        {n.min():.2f} - {n.max():.2f}")
+            rows.append(("n range", f"{n.min():.2f} - {n.max():.2f}"))
 
         # Cone angles
         if hasattr(wr, 'cone_angles_deg'):
             ca = wr.cone_angles_deg
-            lines.append(f"  Cone angles    {ca.min():.1f} - {ca.max():.1f} deg")
+            rows.append(("Cone angles", f"{ca.min():.1f} - {ca.max():.1f} deg"))
 
         # Volume
         vol = 0.0
         try:
             vol = wr.compute_volume()
-            lines.append(f"  Volume          {vol:.6f} m3")
+            rows.append(("Volume", f"{vol:.6f} m3"))
         except Exception:
             pass
 
@@ -160,14 +161,16 @@ class VMPLOCanvas3D(FigureCanvas):
             if len(chords) > 2:
                 a_half = float(np.trapezoid(chords, z_pos))
                 a_plan = 2.0 * a_half  # full vehicle (both halves)
-                lines.append(f"  Planform Area   {a_plan:.4f} m2")
+                rows.append(("Planform Area", f"{a_plan:.4f} m2"))
         except Exception:
             pass
 
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,

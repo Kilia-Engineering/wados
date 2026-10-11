@@ -603,8 +603,10 @@ class PlanarWaverider:
                 p2 = np.array([X[j+1, i], Y[j+1, i]])
                 p3 = np.array([X[j+1, i+1], Y[j+1, i+1]])
                 p4 = np.array([X[j, i+1], Y[j, i+1]])
-                area += 0.5 * abs(np.cross(p2 - p1, p3 - p1))
-                area += 0.5 * abs(np.cross(p3 - p1, p4 - p1))
+                # 2-D cross products (np.cross needs 3-D vectors in NumPy 2)
+                a, b, c = p2 - p1, p3 - p1, p4 - p1
+                area += 0.5 * abs(a[0] * b[1] - a[1] * b[0])
+                area += 0.5 * abs(b[0] * c[1] - b[1] * c[0])
         return area
 
     def volume(self):

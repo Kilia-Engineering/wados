@@ -626,29 +626,31 @@ class PlanarWaveriderCanvas(FigureCanvas):
         bw, bh = wr.base_dimensions()
         vol = wr.volume()
         S_ref = res.get('S_ref', 0)
-        # Volumetric efficiency: V / S_ref^(3/2)
-        vol_eff = vol / S_ref**1.5 if S_ref > 1e-8 else 0.0
+        # Volumetric efficiency V^(2/3) / S_planform (Jessen Eq. 2.5), as in
+        # the optimizer below and the other tabs
+        vol_eff = vol ** (2.0 / 3.0) / S_ref if S_ref > 1e-8 and vol > 0 else 0.0
 
-        info = (
-            "WAVERIDER INFO\n"
-            f"  Method          Planar (Jessen 2026)\n"
-            f"  Mach            {res.get('M_inf', 0):.2f}\n"
-            f"  Shock \u03b2         {wr.beta_deg:.2f}\u00b0\n"
-            f"  Wedge \u03b8         {wr.wedge_angle_deg:.4f}\u00b0\n"
-            f"  Power-law n     {wr.n:.2f}\n"
-            f"  Epsilon         {wr.epsilon:.3f}\n"
-            f"  p1, p2, p3      {wr.p1:.2f}, {wr.p2:.2f}, {wr.p3:.2f}\n"
-            f"  LE Radius       {wr.R:.4f} m\n"
-            f"  Length           {wr.length:.4f} m\n"
-            f"  Width            {wr.width:.4f} m\n"
-            f"  Planform Area    {S_ref:.4f} m\u00b2\n"
-            f"  Volume           {vol:.6f} m\u00b3\n"
-            f"  Vol Efficiency   {vol_eff:.6f}\n"
-            f"  Base             {bw:.4f} x {bh:.4f} m\n"
-            f"  L/D              {res.get('L_over_D', 0):.4f}\n"
-            f"  CL               {res.get('CL', 0):.6f}\n"
-            f"  CD               {res.get('CD', 0):.6f}"
-        )
+        rows = [
+            ("Method", "Planar (Jessen 2026)"),
+            ("Mach", f"{res.get('M_inf', 0):.2f}"),
+            ("Shock \u03b2", f"{wr.beta_deg:.2f}\u00b0"),
+            ("Wedge \u03b8", f"{wr.wedge_angle_deg:.4f}\u00b0"),
+            ("Power-law n", f"{wr.n:.2f}"),
+            ("Epsilon", f"{wr.epsilon:.3f}"),
+            ("p1, p2, p3", f"{wr.p1:.2f}, {wr.p2:.2f}, {wr.p3:.2f}"),
+            ("LE Radius", f"{wr.R:.4f} m"),
+            ("Length", f"{wr.length:.4f} m"),
+            ("Width", f"{wr.width:.4f} m"),
+            ("Planform Area", f"{S_ref:.4f} m\u00b2"),
+            ("Volume", f"{vol:.6f} m\u00b3"),
+            ("Volumetric Efficiency", f"{vol_eff:.6f}"),
+            ("Base", f"{bw:.4f} x {bh:.4f} m"),
+            ("L/D", f"{res.get('L_over_D', 0):.4f}"),
+            ("CL", f"{res.get('CL', 0):.6f}"),
+            ("CD", f"{res.get('CD', 0):.6f}"),
+        ]
+        key_w = max(len(k) for k, _ in rows)
+        info = "WAVERIDER INFO\n" + "\n".join(f"  {k:<{key_w}}  {v}" for k, v in rows)
 
         self.fig.text(
             0.02, 0.97, info, transform=self.fig.transFigure,
@@ -1185,7 +1187,7 @@ class PlanarWaveriderTab(QWidget):
         self.opt_maxiter_spin.setToolTip("Maximum DE generations")
         settings_grid.addWidget(self.opt_maxiter_spin, 0, 3)
 
-        settings_grid.addWidget(QLabel("eta_vol min:"), 1, 0)
+        settings_grid.addWidget(QLabel("Volumetric Efficiency min:"), 1, 0)
         self.opt_eta_spin = QDoubleSpinBox()
         self.opt_eta_spin.setDecimals(4)
         self.opt_eta_spin.setRange(0.0, 1.0)
@@ -1318,7 +1320,7 @@ class PlanarWaveriderTab(QWidget):
         self.opt_status_label.setText(
             f"Gen {iteration}/{maxiter}  |  "
             f"Best L/D: {best_LD:.4f}  |  "
-            f"eta_vol: {best_eta:.5f}")
+            f"Volumetric Efficiency: {best_eta:.5f}")
 
     def _on_opt_complete(self, result):
         """Handle completed optimization."""
@@ -1339,7 +1341,7 @@ class PlanarWaveriderTab(QWidget):
 
         self.opt_progress_bar.setValue(self.opt_progress_bar.maximum())
         self.opt_status_label.setText(
-            f"Done! Best L/D: {LD:.4f} | eta_vol: {eta:.5f}\n"
+            f"Done! Best L/D: {LD:.4f} | Volumetric Efficiency: {eta:.5f}\n"
             f"Evals: {n_evals} (cache hits: {n_hits})\n"
             f"{var_str}")
 
