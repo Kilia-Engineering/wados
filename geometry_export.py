@@ -35,6 +35,8 @@ __all__ = [
     "grid_to_streams",
     "select_stations",
     "streams_to_mesh",
+    "mesh_volume",
+    "stream_volume",
     "span_frame_to_gui",
     "write_stl",
     "write_temp_stl",
@@ -151,6 +153,30 @@ def streams_to_mesh(upper_streams: Sequence[np.ndarray], lower_streams: Sequence
     vertices, triangles = build_stream_mesh(us, ls)
     v, f = _weld(np.asarray(vertices, dtype=float), np.asarray(triangles, dtype=int))
     return Mesh(v, f, metadata={"kind": kind})
+
+
+def mesh_volume(mesh) -> float:
+    """Volume enclosed by a closed triangle mesh (divergence theorem).
+
+    Positive when the normals point outward.
+    """
+    v = np.asarray(mesh.vertices, dtype=float)
+    t = v[np.asarray(mesh.faces, dtype=int)]
+    return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+
+
+def stream_volume(upper_streams: Sequence[np.ndarray], lower_streams: Sequence[np.ndarray], *,
+                  full_span: bool = False, span_axis: int = 2) -> float:
+    """Volume of the closed body bounded by the upper and lower streams.
+
+    Exact for the triangulated surface (``streams_to_mesh``), whatever the
+    streams' x positions: each stream starts at its own leading-edge point.
+    ``full_span`` mirrors a half model as in ``streams_to_mesh``. Returns the
+    magnitude, so the stream order does not matter.
+    """
+    mesh = streams_to_mesh(upper_streams, lower_streams, full_span=full_span,
+                           span_axis=span_axis)
+    return abs(mesh_volume(mesh))
 
 
 def _weld(v: np.ndarray, f: np.ndarray, rel_tol: float = 1e-9):

@@ -47,86 +47,23 @@ except ImportError:
 
 def calculate_waverider_volume(waverider_obj):
     """
-    Calculate internal volume of waverider using trapezoidal rule integration.
-    
-    Uses cross-sectional area integration along the streamwise direction.
-    This is the most accurate method for arbitrary waverider shapes.
-    
+    Internal volume of a waverider half model, in m³ (full vehicle).
+
+    Volume enclosed by the closed full-span surface mesh built from the
+    upper and lower streams (divergence theorem), exact for the
+    triangulated surface. Station 0 must lie on the symmetry plane.
+
     Parameters
     ----------
     waverider_obj : WaveriderGenerator
         Waverider geometry object with upper_surface_streams and lower_surface_streams
-        
-    Returns
-    -------
-    volume : float
-        Internal volume in m³
-        
-    Notes
-    -----
-    The waverider geometry only stores ONE HALF (y >= 0) due to symmetry.
-    The shoelace formula gives the area of half the cross-section, so we
-    multiply by 2 to get the full volume.
     """
-    # Get streamlines
-    upper_streams = waverider_obj.upper_surface_streams
-    lower_streams = waverider_obj.lower_surface_streams
-    
-    if len(upper_streams) == 0 or len(lower_streams) == 0:
+    from geometry_export import stream_volume
+
+    if len(waverider_obj.upper_surface_streams) == 0:
         return 0.0
-    
-    n_streamwise = upper_streams[0].shape[0]  # Number of points along each stream
-    
-    # Calculate area of each cross-section at different x-locations
-    areas = []
-    x_positions = []
-    
-    for i in range(n_streamwise):
-        # Collect all points at this streamwise index
-        y_upper = []
-        z_upper = []
-        y_lower = []
-        z_lower = []
-        
-        for stream in upper_streams:
-            if i < stream.shape[0]:  # Safety check
-                y_upper.append(stream[i, 1])
-                z_upper.append(stream[i, 2])
-        
-        for stream in lower_streams:
-            if i < stream.shape[0]:  # Safety check
-                y_lower.append(stream[i, 1])
-                z_lower.append(stream[i, 2])
-        
-        if len(y_upper) == 0 or len(y_lower) == 0:
-            continue
-        
-        # x position (should be same for all streams at this index)
-        x_pos = upper_streams[0][i, 0]
-        x_positions.append(x_pos)
-        
-        # Create closed polygon: lower surface + upper surface (reversed)
-        z_points = np.concatenate([z_lower, z_upper[::-1]])
-        y_points = np.concatenate([y_lower, y_upper[::-1]])
-        
-        # Shoelace formula for polygon area (this is HALF the cross-section due to symmetry)
-        area = 0.5 * abs(np.dot(z_points, np.roll(y_points, 1)) - 
-                         np.dot(y_points, np.roll(z_points, 1)))
-        
-        areas.append(area)
-    
-    if len(areas) < 2:
-        return 0.0
-    
-    # Integrate using trapezoidal rule (gives half-volume)
-    try:
-        half_volume = np.trapezoid(areas, x_positions)
-    except AttributeError:
-        # Fallback for older numpy versions
-        half_volume = np.trapezoid(areas, x_positions)
-    
-    # Full volume (symmetric waverider - multiply by 2)
-    return 2.0 * abs(half_volume)
+    return stream_volume(waverider_obj.upper_surface_streams,
+                         waverider_obj.lower_surface_streams, full_span=True)
 
 # Import reference area calculator
 try:

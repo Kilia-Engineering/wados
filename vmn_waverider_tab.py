@@ -151,7 +151,8 @@ class VMNCanvas3D(FigureCanvas):
                 chords.append(s[-1, 0] - s[0, 0])
                 z_pos.append(s[0, 2])
             if len(chords) > 2:
-                a_plan = float(np.trapezoid(chords, z_pos))
+                a_half = float(np.trapezoid(chords, z_pos))
+                a_plan = 2.0 * a_half  # full vehicle, like the volume
                 rows.append(("Planform Area", f"{a_plan:.6f} m2"))
         except Exception:
             pass

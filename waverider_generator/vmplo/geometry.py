@@ -278,39 +278,15 @@ class VMPLOWaverider:
     # ================================================================== #
 
     def compute_volume(self) -> float:
-        """Estimate body volume by cross-sectional area integration.
+        """Body volume in m^3 for the full (mirrored) vehicle.
 
-        Positive Y-thickness only (upper above lower).  Integrated in
-        (x, z) via the trapezoidal rule.  Returns volume in m^3 for the
-        full (mirrored) vehicle.
+        Volume enclosed by the closed full-span surface mesh built from the
+        upper and lower streams (divergence theorem).
         """
-        us = self.upper_surface_streams
-        ls = self.lower_surface_streams
-        n_span = len(us)
-        n_stream = us[0].shape[0]
+        from geometry_export import stream_volume
 
-        # For each streamwise j, compute cross-section area A(x_j)
-        areas = []
-        x_stations = []
-        for j in range(n_stream):
-            zs = []
-            dys = []
-            for i in range(n_span):
-                zu, yu = us[i][j, 2], us[i][j, 1]
-                _, yl = ls[i][j, 2], ls[i][j, 1]
-                zs.append(zu)
-                dys.append(max(yu - yl, 0.0))
-            zs = np.asarray(zs)
-            dys = np.asarray(dys)
-            order = np.argsort(zs)
-            areas.append(float(np.trapezoid(dys[order], zs[order])))
-            x_stations.append(us[0][j, 0])
-
-        if len(areas) < 2:
-            return 0.0
-        # Half-vehicle integral, times 2 for full mirror
-        vol_half = float(np.trapezoid(areas, x_stations))
-        return 2.0 * vol_half
+        return stream_volume(self.upper_surface_streams, self.lower_surface_streams,
+                             full_span=True)
 
     def wetted_area(self) -> float:
         """Sum of upper + lower surface triangle areas (half span)."""

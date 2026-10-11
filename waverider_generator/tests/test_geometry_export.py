@@ -226,3 +226,76 @@ def test_shadow_waverider_stream_mesh_is_closed():
     closed, vol = _closed_and_volume(mesh)
     assert closed and vol > 0.0
     assert mesh.vertices[:, 2].min() == pytest.approx(-mesh.vertices[:, 2].max())
+
+
+# ---------------------------------------------------------------------------
+#  Volume
+# ---------------------------------------------------------------------------
+
+def _sliced_volume(upper, lower, nx=400):
+    """Independent volume of a half model (x streamwise, y up, z span):
+    cross-sections at common x stations, each stream interpolated there
+    (zero thickness before its leading edge), integrated across the span
+    and along x; times 2 for the full vehicle."""
+    x0 = min(float(s[:, 0].min()) for s in upper)
+    x1 = max(float(s[:, 0].max()) for s in upper)
+    xs = np.linspace(x0, x1, nx)
+    z = np.array([float(s[0, 2]) for s in upper])
+    order = np.argsort(z)
+    areas = []
+    for x in xs:
+        th = np.zeros(len(upper))
+        for k, (su, sl) in enumerate(zip(upper, lower)):
+            if su[-1, 0] - su[0, 0] > 1e-12 and x >= su[0, 0]:
+                th[k] = max(np.interp(x, su[:, 0], su[:, 1]) - np.interp(x, sl[:, 0], sl[:, 1]), 0.0)
+        areas.append(np.trapezoid(th[order], z[order]))
+    return 2.0 * float(np.trapezoid(areas, xs))
+
+
+def test_stream_volume_is_exact_for_a_swept_wedge():
+    """Half model: flat top, lower surface y = -t (x - x_le(z)), straight
+    swept leading edge x_le = z L / b. Volume t L^2 b / 3."""
+    from geometry_export import stream_volume
+
+    L, b, t = 2.0, 0.8, 0.15
+    upper, lower = [], []
+    for z in np.linspace(0.0, b, 11):
+        x = np.linspace(z * L / b, L, 30)
+        upper.append(np.c_[x, np.zeros_like(x), np.full_like(x, z)])
+        lower.append(np.c_[x, -t * (x - z * L / b), np.full_like(x, z)])
+    assert stream_volume(upper, lower, full_span=True) == pytest.approx(t * L**2 * b / 3, rel=1e-12)
+
+
+def test_oc_waverider_volume_against_cross_sections(oc_waverider):
+    """Each stream starts at its own leading-edge x. The volume must not
+    assume a common x per point index (that overestimated it by about 20 %)."""
+    from geometry_export import stream_volume
+    from optimization_engine import calculate_volume
+
+    U, L = oc_waverider.upper_surface_streams, oc_waverider.lower_surface_streams
+    exact = stream_volume(U, L, full_span=True)
+    assert calculate_volume(oc_waverider) == pytest.approx(exact, rel=1e-12)
+    assert exact == pytest.approx(_sliced_volume(U, L), rel=0.01)
+
+
+def test_shadow_and_planar_volumes_are_their_closed_mesh_volumes():
+    from geometry_export import grid_to_streams, mesh_volume, span_frame_to_gui
+    from planar_waverider import PlanarWaverider
+    from shadow_waverider import create_second_order_waverider
+
+    wr = create_second_order_waverider(mach=6.0, shock_angle=12.0, A2=-2.0, A0=-0.15)
+    mesh = streams_to_mesh(list(np.asarray(wr.upper_surface)), list(np.asarray(wr.lower_surface)))
+    assert wr.volume == pytest.approx(mesh_volume(mesh), rel=1e-12)
+
+    pw = PlanarWaverider(length=1.0, width=2.0, n=0.5, beta_deg=10.0, M_inf=6.0)
+    pw.generate(nx=20, ny=15)
+    upper = grid_to_streams(pw.upper_surface_x, pw.upper_surface_y, pw.upper_surface_z)
+    lower = grid_to_streams(pw.lower_surface_x, pw.lower_surface_y, pw.lower_surface_z)
+    gui = span_frame_to_gui(streams_to_mesh(upper, lower, span_axis=1))
+    assert pw.volume() == pytest.approx(mesh_volume(gui), rel=1e-12)
+    # independent check on the half span y >= 0 (grid rows are the streamwise
+    # lines), in the (x, up, span) frame
+    rows_u = np.stack([pw.upper_surface_x, pw.upper_surface_z, pw.upper_surface_y], axis=-1)
+    rows_l = np.stack([pw.lower_surface_x, pw.lower_surface_z, pw.lower_surface_y], axis=-1)
+    keep = rows_u[:, 0, 2] >= -1e-12
+    assert pw.volume() == pytest.approx(_sliced_volume(list(rows_u[keep]), list(rows_l[keep])), rel=0.02)

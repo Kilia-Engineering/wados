@@ -610,31 +610,16 @@ class PlanarWaverider:
         return area
 
     def volume(self):
-        """Approximate enclosed volume using trapezoidal cross-sections.
+        """Enclosed volume: the closed surface mesh built from the upper and
+        lower surface grids (one stream per row, full span), by the
+        divergence theorem."""
+        from geometry_export import grid_to_streams, stream_volume
 
-        Each streamwise slice has a cross-section in the Y-Z plane.
-        We integrate those areas along the X-axis using centerline dx.
-        """
         if self.upper_surface_x is None:
             return 0.0
-        ny, nx = self.upper_surface_x.shape
-        # Use the centerline row (ny//2) for x-spacing, which has full chord
-        j_center = ny // 2
-        vol = 0.0
-        for i in range(nx - 1):
-            # Cross-section area at streamwise station i
-            area_i = 0.0
-            for j in range(ny - 1):
-                dz_j = self.upper_surface_z[j, i] - self.lower_surface_z[j, i]
-                dz_j1 = (self.upper_surface_z[j+1, i]
-                         - self.lower_surface_z[j+1, i])
-                dy = abs(self.upper_surface_y[j+1, i]
-                         - self.upper_surface_y[j, i])
-                area_i += 0.5 * (max(dz_j, 0) + max(dz_j1, 0)) * dy
-            dx = abs(self.upper_surface_x[j_center, i+1]
-                     - self.upper_surface_x[j_center, i])
-            vol += area_i * dx
-        return vol
+        upper = grid_to_streams(self.upper_surface_x, self.upper_surface_y, self.upper_surface_z)
+        lower = grid_to_streams(self.lower_surface_x, self.lower_surface_y, self.lower_surface_z)
+        return stream_volume(upper, lower, span_axis=1)
 
     def base_dimensions(self):
         """Return base (trailing edge) width and max height."""
