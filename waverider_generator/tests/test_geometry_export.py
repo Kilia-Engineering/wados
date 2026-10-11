@@ -270,12 +270,15 @@ def test_oc_waverider_volume_against_cross_sections(oc_waverider):
     """Each stream starts at its own leading-edge x. The volume must not
     assume a common x per point index (that overestimated it by about 20 %)."""
     from geometry_export import stream_volume
-    from optimization_engine import calculate_volume
 
     U, L = oc_waverider.upper_surface_streams, oc_waverider.lower_surface_streams
     exact = stream_volume(U, L, full_span=True)
-    assert calculate_volume(oc_waverider) == pytest.approx(exact, rel=1e-12)
     assert exact == pytest.approx(_sliced_volume(U, L), rel=0.01)
+
+    pytest.importorskip("cadquery")          # optimization_engine imports the CAD exporter
+    from optimization_engine import calculate_volume
+
+    assert calculate_volume(oc_waverider) == pytest.approx(exact, rel=1e-12)
 
 
 def test_shadow_and_planar_volumes_are_their_closed_mesh_volumes():

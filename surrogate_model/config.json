@@ -51,10 +51,19 @@
       "MAPE": 0.33272126025639276
     },
     "Volume": {
-      "R2": 0.9999670719446282,
-      "RMSE": 0.014601765860906345,
-      "MAE": 0.010525559281231521,
-      "MAPE": 13.690250390151611
+      "R2": 0.9998537925345202,
+      "RMSE": 0.055908902492488276,
+      "MAE": 0.010611266239517357,
+      "MAPE": 0.37427903193535844
     }
+  },
+  "volume_model": {
+    "training_date": "2026-10-11T21:15:34",
+    "input_file": "volume_training_data.csv.gz",
+    "n_samples": 18000,
+    "volume": "exact: closed full-span surface mesh (geometry_export.stream_volume)",
+    "model": "log V from X1-X4, design_Mach, design_beta, log width, log height, log(beta - Mach angle)",
+    "scikit_learn": "1.7.2",
+    "script": "surrogate_model/train_volume_model.py"
   }
 }

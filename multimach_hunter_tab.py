@@ -47,6 +47,9 @@ except ImportError:
 # NEURAL NETWORK ENSEMBLE (same as other tabs)
 # =============================================================================
 
+OLD_VOLUME_MODEL_NOTE = "this Volume model predates the exact volumes and predicts about 2x too much; retrain with surrogate_model/train_volume_model.py"
+
+
 class NNEnsemble:
     """Ensemble of neural networks for prediction with uncertainty."""
     
@@ -417,6 +420,12 @@ class MultiMachHunterTab(QWidget):
                 self.has_volume_model = True
             else:
                 self.has_volume_model = False
+            # Models trained on exact volumes record it in config.json ("volume_model")
+            self.volume_model_exact = False
+            config_path = os.path.join(folder, 'config.json')
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    self.volume_model_exact = bool(json.load(f).get('volume_model'))
             
             self.models_loaded = True
             
@@ -550,7 +559,8 @@ class MultiMachHunterTab(QWidget):
             results += f"  Height: {height_min:.1f} - {height_max:.1f} m\n"
             if enforce_volume:
                 results += f"  Min Volume: {min_volume:.1f} m³\n"
-                results += f"  ⚠️ NOTE: Volume predictions may be ~50% higher than actual.\n"
+                if self.has_volume_model and not getattr(self, 'volume_model_exact', False):
+                    results += f"  ⚠️ NOTE: {OLD_VOLUME_MODEL_NOTE}.\n"
             
             results += f"\nDESIGN CONSTRAINTS:\n"
             results += f"  Design Mach: {design_mach_min:.0f} - {design_mach_max:.0f}\n"

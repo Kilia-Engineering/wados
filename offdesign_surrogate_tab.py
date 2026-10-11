@@ -48,6 +48,9 @@ except ImportError:
 # NEURAL NETWORK ENSEMBLE (same as training script)
 # =============================================================================
 
+OLD_VOLUME_MODEL_NOTE = "this Volume model predates the exact volumes and predicts about 2x too much; retrain with surrogate_model/train_volume_model.py"
+
+
 class NNEnsemble:
     """Ensemble of neural networks for prediction with uncertainty."""
     
@@ -916,8 +919,8 @@ class OffDesignSurrogateTab(QWidget):
                 results += f"  Min Volume: {min_volume:.2f} m³"
                 if self.has_volume_model:
                     results += " (enforced via surrogate)\n"
-                    results += "  ⚠️ NOTE: Volume predictions may be ~50% higher than actual.\n"
-                    results += "     Verify volumes in 3D View after applying design.\n"
+                    if not (self.model_config or {}).get('volume_model'):
+                        results += f"  ⚠️ NOTE: {OLD_VOLUME_MODEL_NOTE}.\n"
                 else:
                     results += " (approximate: W×H×L scaling)\n"
             else:

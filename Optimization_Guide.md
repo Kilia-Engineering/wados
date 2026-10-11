@@ -241,6 +241,12 @@ Uses a pre-trained neural network ensemble for instant aerodynamic predictions w
 
 A trained ensemble model must be loaded first. Models are trained from CSV datasets containing design parameters and their PySAGAS-computed aerodynamic coefficients.
 
+**Volume model.** The minimum-volume limit of this tab and of the Multi-Mach Hunter uses `surrogate_model/ensemble_Volume.pkl`:
+- **Training data.** Exact volumes of the closed full-span OC waverider (as the OC tab reports them), for 6,000 hunter-like shapes. Design Mach 3–6, shock angle from the Mach angle + 1° to 30°, width 0.5–5 m, height 0.1–5 m.
+- **Accuracy.** Held out: 0.37 % mean error. On fresh hunter designs: 0.38 % mean, 2.6 % worst.
+- **Retraining.** Regenerate the data and retrain with `python surrogate_model/train_volume_model.py generate` and then `... train`; train with the scikit-learn version the tabs use.
+- **Older models.** An older Volume model (no `volume_model` entry in `config.json`) predicted about twice the actual volume; the tabs say so when one is loaded.
+
 ---
 
 ## Multi-Mach Hunter
