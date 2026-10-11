@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QSplitter, QApplication, QScrollArea,
                              QComboBox, QTabWidget, QButtonGroup, QStackedWidget)
 from PyQt5.QtCore import Qt
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1076,6 +1078,7 @@ class HybridWaveriderTab(QWidget):
         self.shock_surface_check.setToolTip("Export conical shock as separate STEP body")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
+        layout.addWidget(aero_handoff.send_button(self), 4, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -1247,6 +1250,16 @@ class HybridWaveriderTab(QWidget):
     # ══════════════════════════════════════════════════════
     #  Export
     # ══════════════════════════════════════════════════════
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span; the half model mirrored)."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(wr.upper_surface_streams, wr.lower_surface_streams,
+                               full_span=True, kind="hybrid_waverider")
+        return write_temp_stl(mesh, prefix="hybrid_waverider_")
 
     def export_stl(self):
         if self.waverider is None:

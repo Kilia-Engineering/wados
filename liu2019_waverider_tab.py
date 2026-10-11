@@ -13,6 +13,8 @@ from typing import Optional
 import numpy as np
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import aero_handoff
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAction, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
@@ -822,6 +824,9 @@ class Liu2019WaveriderTab(QWidget):
             menu.addAction(act)
         self.export_btn.setMenu(menu)
         actions.addWidget(self.export_btn)
+
+        self.send_aero_btn = aero_handoff.send_button(self)
+        actions.addWidget(self.send_aero_btn)
         self._set_export_enabled(False)
 
         self.run_aero_btn = QPushButton("Run aero (Ma 6, 8, 10, 13)")
@@ -1036,7 +1041,8 @@ class Liu2019WaveriderTab(QWidget):
     _EXPORT_STEM = "liu2019_waverider"
 
     def _set_export_enabled(self, enabled: bool):
-        for btn in (self.export_stl_btn, self.export_step_btn, self.export_btn):
+        for btn in (self.export_stl_btn, self.export_step_btn, self.export_btn,
+                    self.send_aero_btn):
             btn.setEnabled(enabled)
 
     # Faceted STEP resolution: stations per half span x points per stream.
@@ -1057,6 +1063,18 @@ class Liu2019WaveriderTab(QWidget):
             lower = select_stations(lower, n_stations)
         return streams_to_mesh(upper, lower, full_span=True, n_points=n_points,
                                kind="liu2019_waverider")
+
+    def analysis_summary(self):
+        p = self.waverider.params
+        return (f"Ma {p['Ma_center']:g}-{p['Ma_tip']:g}, \u03b2={p['beta_deg']:g}\u00b0, "
+                f"L={p['L_w']:.3g} m")
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import write_temp_stl
+
+        return write_temp_stl(self._closed_mesh(), prefix=self._EXPORT_STEM + "_")
 
     def _on_export(self, fmt: str):
         if self.waverider is None:

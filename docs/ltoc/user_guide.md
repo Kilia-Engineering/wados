@@ -87,7 +87,7 @@ Both use the GUI frame (x streamwise, y up, z span).
 
 The shock numbers are always stored. A preset whose numbers differ from the saved ones loads as a custom shock with the saved numbers; projects saved with the earlier preset names ("R1 waverider case I (Eq. 23), M 6" and so on) still select the renamed presets. For the OC import, the OC design is stored in the project's own `oc_waverider` section: after loading, generate it in the OC Waverider tab first. A loaded design is not solved automatically; click *Generate*.
 
-The **Aero Analysis** tab can load the waverider directly: choose *LTOCs Waverider* in its mesh dialog for the preview, the PySAGAS analysis or the AeroDeck sweep.
+*Send to Aero Analysis* loads the waverider into the **Aero Analysis** tab (closed full-span mesh, A_ref set to its planform area) for the preview, the PySAGAS analysis or the AeroDeck sweep. That tab's mesh dialog also offers *LTOCs Waverider* directly.
 
 ---
 

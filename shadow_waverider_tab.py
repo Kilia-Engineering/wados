@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QProgressBar, QTextEdit, QTabWidget, QFileDialog,
                              QMessageBox, QSplitter, QScrollArea)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1656,6 +1658,7 @@ class ShadowWaveriderTab(QWidget):
             "in the STEP file (can be hidden independently in CAD)")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
+        layout.addWidget(aero_handoff.send_button(self), 4, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -2638,6 +2641,22 @@ CG:             [{wr.cg[0]:.4f}, {wr.cg[1]:.4f}, {wr.cg[2]:.4f}]
 """)
     
     # === Export methods ===
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span). The surface grids are full span
+        already, one stream per row."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(list(np.asarray(wr.upper_surface)),
+                               list(np.asarray(wr.lower_surface)),
+                               kind="cone_derived_waverider")
+        return write_temp_stl(mesh, prefix="cone_derived_waverider_")
+
+    def analysis_summary(self):
+        wr = self.waverider
+        return f"M={wr.mach}, \u03b2={wr.shock_angle:.1f}\u00b0, L={wr.length:.2f}"
+
     def export_stl(self):
         if self.waverider is None:
             QMessageBox.warning(self, "Warning", "Generate waverider first!")

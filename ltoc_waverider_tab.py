@@ -11,8 +11,8 @@ solved in a QThread with a per-station progress bar and can be cancelled.
 Stations the method refuses (spec flags 4 and 7) are listed with their
 reason, and the geometry is then not exported. Export writes STL in metres
 and STEP in millimetres, in the GUI frame (x streamwise, y up, z span), as
-the other tabs do. The Aero Analysis tab can take the waverider directly
-("LTOCs Waverider" in its mesh dialog).
+the other tabs do. "Send to Aero Analysis" loads the waverider into the Aero
+Analysis tab, whose mesh dialog also lists it ("LTOCs Waverider").
 """
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ import sys
 
 import numpy as np
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
                              QDoubleSpinBox, QFileDialog, QGridLayout, QGroupBox,
@@ -417,7 +419,8 @@ class LTOCWaveriderTab(QWidget):
         self.btn_export_step.setToolTip("Faceted STEP solid via cadquery, millimetres,\n"
                                         "GUI frame (x streamwise, y up, z span).")
         self.btn_export_step.clicked.connect(self.export_step_dialog)
-        for b in (self.btn_export_stl, self.btn_export_step):
+        self.btn_send_aero = aero_handoff.send_button(self)
+        for b in (self.btn_export_stl, self.btn_export_step, self.btn_send_aero):
             b.setEnabled(False)
         lay.addWidget(self.btn_export_stl, 2, 0)
         lay.addWidget(self.btn_export_step, 2, 1)
@@ -426,6 +429,7 @@ class LTOCWaveriderTab(QWidget):
         help_btn.setToolTip("Method, inputs, refusals and references.")
         help_btn.clicked.connect(self.show_help_dialog)
         lay.addWidget(help_btn, 3, 0)
+        lay.addWidget(self.btn_send_aero, 3, 1)
         g.setLayout(lay)
         return g
 
@@ -631,7 +635,7 @@ class LTOCWaveriderTab(QWidget):
             self._show_output(f"Input error: {e}", "#ef4444")
             return
         self.result, self.waverider = None, None
-        for b in (self.btn_export_stl, self.btn_export_step):
+        for b in (self.btn_export_stl, self.btn_export_step, self.btn_send_aero):
             b.setEnabled(False)
         self.btn_generate.setEnabled(False)
         self.btn_cancel.setEnabled(True)
@@ -670,7 +674,7 @@ class LTOCWaveriderTab(QWidget):
                 c.placeholder("Refused stations: see the output panel.")
             return
         self.waverider = res.waverider
-        for b in (self.btn_export_stl, self.btn_export_step):
+        for b in (self.btn_export_stl, self.btn_export_step, self.btn_send_aero):
             b.setEnabled(True)
         self._show_output(res.summary(), "#22c55e")
         self.refresh_views()
@@ -801,6 +805,10 @@ class LTOCWaveriderTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Export failed", f"{type(e).__name__}: {e}")
 
+    def analysis_summary(self) -> str:
+        wr = self.waverider
+        return f"M={wr.M_inf:g}, {len(wr.stations)} stream surfaces, L={wr.length:.3g}"
+
     def stl_for_analysis(self) -> str:
         """Write the current waverider to a temporary STL for the Aero Analysis tab."""
         import tempfile
@@ -853,8 +861,8 @@ class LTOCWaveriderTab(QWidget):
         "    area (this reproduces the published values); wetted-area values too.\n"
         "  Views: 3-D (lower surface coloured by pressure), front view, wall\n"
         "    pressure along and across the body, per-station diagnostics.\n"
-        "  Export: STL (metres) and STEP (millimetres). The Aero Analysis tab can\n"
-        "    load the waverider directly.\n\n"
+        "  Export: STL (metres) and STEP (millimetres). Send to Aero Analysis\n"
+        "    loads the waverider into the Aero Analysis tab.\n\n"
         "REFERENCES\n"
         "  R1 Zheng, Hu, Li, Zhu, You, Song, Local-Turning Osculating Cones Method\n"
         "     for Waverider Design, AIAA J 58(8):3499-3513, 2020, doi:10.2514/1.J059139.\n"

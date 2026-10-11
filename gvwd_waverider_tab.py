@@ -30,6 +30,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QProgressBar, QFileDialog,
                              QDialog, QTextEdit, QDialogButtonBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1287,6 +1289,7 @@ class GVWDWaveriderTab(QWidget):
             "(faceted BREP, millimetres, GUI frame: x streamwise, y up, z span).")
         self.btn_export_step.clicked.connect(self.export_step_dialog)
         layout.addWidget(self.btn_export_step, row, 1); row += 1
+        layout.addWidget(aero_handoff.send_button(self), row, 0, 1, 2); row += 1
 
         help_btn = QPushButton("?")
         help_btn.setFixedWidth(32)
@@ -1683,6 +1686,19 @@ class GVWDWaveriderTab(QWidget):
     # ------------------------------------------------------------------
     #  Export
     # ------------------------------------------------------------------
+
+    def has_analysis_geometry(self) -> bool:
+        return self.full_mesh is not None
+
+    def analysis_summary(self) -> str:
+        return f"{self.current_mode}, {self.full_mesh.n_faces} faces"
+
+    def stl_for_analysis(self):
+        """The current mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import span_frame_to_gui, write_temp_stl
+
+        return write_temp_stl(span_frame_to_gui(self.full_mesh), prefix="gvwd_")
 
     def export_stl_dialog(self):
         if self.full_mesh is None:

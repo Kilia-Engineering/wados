@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (
     QScrollArea, QComboBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -1110,10 +1112,7 @@ class PlanarWaveriderTab(QWidget):
             step_btn.setToolTip("CadQuery not available")
         layout.addWidget(step_btn, 0, 1)
 
-        send_btn = QPushButton("Send to Aero Tab")
-        send_btn.setToolTip("Send mesh to main Aero Analysis tab")
-        send_btn.clicked.connect(self._send_to_aero_tab)
-        layout.addWidget(send_btn, 1, 0, 1, 2)
+        layout.addWidget(aero_handoff.send_button(self), 1, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -1736,23 +1735,16 @@ class PlanarWaveriderTab(QWidget):
         self.progress_label.setText("STEP export failed")
         QMessageBox.critical(self, "Error", msg)
 
-    def _send_to_aero_tab(self):
-        """Send mesh data to the main aero analysis tab."""
-        if self.waverider is None:
-            QMessageBox.warning(self, "Warning", "Generate waverider first!")
-            return
-        if self.parent_gui and hasattr(self.parent_gui, 'imported_geometry'):
-            verts, faces = self.waverider.get_mesh()
-            self.parent_gui.imported_geometry = {
-                'vertices': verts,
-                'faces': faces,
-                'source': 'planar_waverider',
-                'params': self.waverider.to_dict(),
-            }
-            QMessageBox.information(
-                self, "Sent",
-                "Planar waverider mesh sent to Aero Analysis tab.")
-        else:
-            QMessageBox.warning(
-                self, "Warning",
-                "Parent GUI or imported_geometry not available.")
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span). The planar generator works in
+        x streamwise, y span, z up, with one stream per grid row."""
+        from geometry_export import (grid_to_streams, span_frame_to_gui,
+                                     streams_to_mesh, write_temp_stl)
+
+        wr = self.waverider
+        upper = grid_to_streams(wr.upper_surface_x, wr.upper_surface_y, wr.upper_surface_z)
+        lower = grid_to_streams(wr.lower_surface_x, wr.lower_surface_y, wr.lower_surface_z)
+        mesh = streams_to_mesh(upper, lower, span_axis=1, kind="planar_waverider")
+        return write_temp_stl(span_frame_to_gui(mesh), prefix="planar_waverider_")
+

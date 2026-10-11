@@ -90,6 +90,10 @@ the understanding that defaults and outputs may change between revisions.
 - **Optimization**: `optimization_engine.py` (NSGA-II via pymoo) and
   `surrogate_tab.py` / `ai_surrogate.py` (sklearn / PyTorch ensembles).
 - **Long-running work** runs in `QThread` workers — the GUI never blocks.
+- **Design tab → Aero Analysis**: every design tab has *Send to Aero Analysis*,
+  which loads its closed full-span mesh (and its planform area as A_ref) into
+  the Aero Analysis tab; that tab's mesh dialog also lists every tab with a
+  design (`aero_handoff.py`).
 
 ---
 
@@ -118,14 +122,16 @@ wados/
 
 ## Coordinate system
 
-A common convention across all methods:
+Exports and the Aero Analysis tab use one frame (the PySAGAS frame):
 
 - `x` = streamwise (nose → base)
-- `y` = spanwise (or transverse, depending on method — check the
-  method's own docstring)
-- `z` = vertical
-- Origin at the waverider tip
-- STEP export scale factor: `1000` (m → mm)
+- `y` = up
+- `z` = spanwise (symmetry plane `z = 0`)
+- STL in metres; STEP export scale factor `1000` (m → mm)
+
+Some libraries work internally in another frame (GVWD, PSWR-1 and the planar
+waverider use `y` spanwise, `z` up; LTOCs uses `Z` down) and convert on export —
+check the method's own docstring.
 
 ---
 

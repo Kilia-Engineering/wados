@@ -24,6 +24,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDialog, QTextEdit, QDialogButtonBox,
                              QFileDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import aero_handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -717,7 +719,8 @@ class PSWRWaveriderTab(QWidget):
         self.export_step_btn.setToolTip(
             "Faceted full-span STEP solid in millimetres (needs cadquery)")
         self.export_step_btn.clicked.connect(self.export_step)
-        for b in (self.export_stl_btn, self.export_step_btn):
+        self.send_aero_btn = aero_handoff.send_button(self)
+        for b in (self.export_stl_btn, self.export_step_btn, self.send_aero_btn):
             b.setStyleSheet(export_style)
             b.setEnabled(False)
             export_row.addWidget(b)
@@ -1651,6 +1654,7 @@ class PSWRWaveriderTab(QWidget):
             self.status_label.setStyleSheet("color: green")
             self.export_stl_btn.setEnabled(True)
             self.export_step_btn.setEnabled(True)
+            self.send_aero_btn.setEnabled(True)
 
         except Exception as e:
             self.status_label.setText(f"Error: {str(e)}")
@@ -1680,6 +1684,13 @@ class PSWRWaveriderTab(QWidget):
         lower = [to_gui_frame(s) for s in wr.lower_surface_streams]
         return streams_to_mesh(upper, lower, full_span=False, n_points=n_points,
                                kind="pswr1_waverider")
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import write_temp_stl
+
+        return write_temp_stl(self._export_mesh(), prefix="pswr1_waverider_")
 
     def export_stl(self):
         if self.waverider is None:

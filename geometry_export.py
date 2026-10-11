@@ -23,6 +23,7 @@ faceted STEP solid (``gvwd.export.step.write_step``, which needs cadquery).
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -36,6 +37,7 @@ __all__ = [
     "streams_to_mesh",
     "span_frame_to_gui",
     "write_stl",
+    "write_temp_stl",
     "write_step",
     "StepUnavailableError",
 ]
@@ -177,6 +179,19 @@ def write_stl(mesh, path, *, scale: float = 1.0) -> Path:
     from gvwd.export.stl import write_stl as _write_stl
 
     return Path(_write_stl(mesh, path, scale=scale))
+
+
+def write_temp_stl(mesh, prefix: str = "wados_") -> str:
+    """Binary STL (metres) in a new temporary file, for the Aero Analysis tab.
+
+    The caller owns the file; the hub keeps it as the analysis mesh.
+    """
+    import tempfile
+
+    fd, path = tempfile.mkstemp(suffix=".stl", prefix=prefix)
+    os.close(fd)
+    write_stl(mesh, path)
+    return path
 
 
 def write_step(mesh, path, *, scale: float = 1000.0) -> Path:

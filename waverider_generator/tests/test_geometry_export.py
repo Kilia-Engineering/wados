@@ -166,3 +166,63 @@ def test_liu2019_bspline_step_has_true_size(tmp_path, liu_waverider):
     liu_waverider.export_step(str(path), scale=1000.0)
     bb = cq.importers.importStep(str(path)).val().BoundingBox()
     assert bb.xlen == pytest.approx(1000.0 * PAPER_PARAMS["L_w"], rel=1e-2)
+
+
+# ---------------------------------------------------------------------------
+#  Reference (planform) area for the Aero Analysis tab
+# ---------------------------------------------------------------------------
+
+def test_stl_planform_area_counts_a_closed_surface_once(oc_waverider):
+    """A_ref from an STL: the upper and lower surfaces of a closed body both
+    project onto the planform, so the projection is halved; an open single
+    skin is counted once."""
+    from gvwd.geometry.mesh import Mesh
+
+    from geometry_export import write_temp_stl
+    from reference_area_calculator import (calculate_planform_area_from_waverider,
+                                           calculate_reference_area_from_stl)
+
+    mesh = streams_to_mesh(oc_waverider.upper_surface_streams,
+                           oc_waverider.lower_surface_streams, full_span=True)
+    area, method = calculate_reference_area_from_stl(write_temp_stl(mesh))
+    planform, _ = calculate_planform_area_from_waverider(oc_waverider)
+    assert "closed" in method and area == pytest.approx(planform, rel=1e-3)
+
+    plate = Mesh(np.array([[0, 0, 0], [2, 0, 0], [2, 0, 3], [0, 0, 3]], float),
+                 np.array([[0, 1, 2], [0, 2, 3]]))
+    area, method = calculate_reference_area_from_stl(write_temp_stl(plate))
+    assert "open" in method and area == pytest.approx(6.0)
+
+
+def test_planar_waverider_with_current_numpy():
+    """np.cross no longer takes 2-D vectors (NumPy 2); the planar waverider's
+    planform area must still compute. Its surface grids (x streamwise,
+    y span, z up; one stream per row) give the closed mesh sent to the Aero
+    Analysis tab, whose STL projection is the same planform area."""
+    from geometry_export import grid_to_streams, span_frame_to_gui, write_temp_stl
+    from planar_waverider import PlanarWaverider
+    from reference_area_calculator import calculate_reference_area_from_stl
+
+    wr = PlanarWaverider(length=1.0, width=2.0, n=0.5, beta_deg=10.0, M_inf=6.0)
+    wr.generate(nx=20, ny=15)
+    mesh = span_frame_to_gui(streams_to_mesh(
+        grid_to_streams(wr.upper_surface_x, wr.upper_surface_y, wr.upper_surface_z),
+        grid_to_streams(wr.lower_surface_x, wr.lower_surface_y, wr.lower_surface_z),
+        span_axis=1))
+    closed, vol = _closed_and_volume(mesh)
+    assert closed and vol > 0.0
+    assert mesh.vertices[:, 1].max() <= 1e-12                 # y up: the body hangs below the top
+    area, _ = calculate_reference_area_from_stl(write_temp_stl(mesh))
+    assert wr.planform_area() == pytest.approx(area, rel=5e-3)        # two discretisations
+
+
+def test_shadow_waverider_stream_mesh_is_closed():
+    """The cone-derived waverider's surface grids (full span, one stream per
+    row) give the closed mesh sent to the Aero Analysis tab."""
+    from shadow_waverider import create_second_order_waverider
+
+    wr = create_second_order_waverider(mach=6.0, shock_angle=12.0, A2=-2.0, A0=-0.15)  # tab default
+    mesh = streams_to_mesh(list(np.asarray(wr.upper_surface)), list(np.asarray(wr.lower_surface)))
+    closed, vol = _closed_and_volume(mesh)
+    assert closed and vol > 0.0
+    assert mesh.vertices[:, 2].min() == pytest.approx(-mesh.vertices[:, 2].max())

@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QStackedWidget, QComboBox)
 from PyQt5.QtCore import Qt
 
+import aero_handoff
+
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -611,6 +613,7 @@ class VMOFWaveriderTab(QWidget):
         layout.addWidget(tri_btn, 0, 1)
         layout.addWidget(step_btn, 1, 0, 1, 2)
         layout.addWidget(self.half_vehicle_check, 2, 0, 1, 2)
+        layout.addWidget(aero_handoff.send_button(self), 3, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -853,6 +856,16 @@ class VMOFWaveriderTab(QWidget):
     # ==============================================================
     #  Export
     # ==============================================================
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span; the half model mirrored)."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(wr.upper_surface_streams, wr.lower_surface_streams,
+                               full_span=True, kind="vmof_waverider")
+        return write_temp_stl(mesh, prefix="vmof_waverider_")
 
     def export_stl(self):
         if self.waverider is None:
