@@ -45,6 +45,8 @@ from __future__ import annotations
 
 import struct
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 
 from waverider_generator.vmplo.bspline import BSpline1D
 from waverider_generator.vmplo.osculating import OsculatingAssembly
@@ -301,13 +303,13 @@ class VMPLOWaverider:
             zs = np.asarray(zs)
             dys = np.asarray(dys)
             order = np.argsort(zs)
-            areas.append(float(np.trapz(dys[order], zs[order])))
+            areas.append(float(np.trapezoid(dys[order], zs[order])))
             x_stations.append(us[0][j, 0])
 
         if len(areas) < 2:
             return 0.0
         # Half-vehicle integral, times 2 for full mirror
-        vol_half = float(np.trapz(areas, x_stations))
+        vol_half = float(np.trapezoid(areas, x_stations))
         return 2.0 * vol_half
 
     def wetted_area(self) -> float:
@@ -349,7 +351,7 @@ class VMPLOWaverider:
         order = np.argsort(zs)
         zs_sorted = np.asarray(zs)[order]
         chords_sorted = np.asarray(chords)[order]
-        area_half = float(np.trapz(chords_sorted, zs_sorted))
+        area_half = float(np.trapezoid(chords_sorted, zs_sorted))
         return 2.0 * area_half
 
     def volumetric_efficiency(self, definition: str = "corda") -> float:

@@ -14,6 +14,8 @@ Author: Adapted for integration with existing waverider_generator package
 """
 
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 import math
 from scipy.integrate import solve_ivp
 from scipy.interpolate import UnivariateSpline, interp1d
@@ -600,7 +602,7 @@ class ConeWaverider:
             areas.append(area)
         
         # Integrate using trapezoidal rule
-        volume = np.trapz(areas, z_vals)
+        volume = np.trapezoid(areas, z_vals)
         return volume
     
     def _cross_section_area_at_z(self, z: float) -> float:

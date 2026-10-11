@@ -60,3 +60,6 @@ last_session*.json
 
 # Logs
 *.log
+
+# Reference papers (copyrighted; keep local copies only, see docs/refs/README.md)
+docs/refs/*.pdf

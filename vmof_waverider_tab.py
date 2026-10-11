@@ -3,6 +3,8 @@
 import math
 import sys
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QGridLayout,
@@ -146,7 +148,7 @@ class VMOFCanvas3D(FigureCanvas):
                 chords.append(s[-1, 0] - s[0, 0])
                 z_pos.append(s[0, 2])
             if len(chords) > 2:
-                a_half = float(np.trapz(chords, z_pos))
+                a_half = float(np.trapezoid(chords, z_pos))
                 a_plan = 2.0 * a_half  # full vehicle
                 lines.append(f"  Planform Area   {a_plan:.4f} m2")
         except Exception:

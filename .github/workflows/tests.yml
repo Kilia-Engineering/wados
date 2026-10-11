@@ -43,3 +43,6 @@ jobs:
 
       - name: Run waverider_generator test suite
         run: pytest waverider_generator/tests/ -q
+
+      - name: Run LTOCs test suite
+        run: pytest ltoc/tests/ -q

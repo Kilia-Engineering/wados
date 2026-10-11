@@ -1,0 +1,315 @@
+{
+ "forces": {
+  "I": [
+   {
+    "stations": 13,
+    "n_points": 40,
+    "CL": 0.2201618642076019,
+    "CD": 0.07438324936359932,
+    "L/D": 2.9598312266705276,
+    "CL_wetted": 0.17028750331666173,
+    "CD_wetted": 0.05753284233987076,
+    "area_planform": 0.45935257254054884,
+    "area_wetted": 0.5938892562833745,
+    "seconds": 4.612691640853882
+   },
+   {
+    "stations": 25,
+    "n_points": 40,
+    "CL": 0.2203251281572507,
+    "CD": 0.07481725668235524,
+    "L/D": 2.9448437155703915,
+    "CL_wetted": 0.17018573907188708,
+    "CD_wetted": 0.05779109369100205,
+    "area_planform": 0.4596126891788551,
+    "area_wetted": 0.595021799113588,
+    "seconds": 8.873526334762573
+   },
+   {
+    "stations": 49,
+    "n_points": 40,
+    "CL": 0.22036824833378843,
+    "CD": 0.07493118140352441,
+    "L/D": 2.940941864336111,
+    "CL_wetted": 0.17015952178801308,
+    "CD_wetted": 0.05785885258443383,
+    "area_planform": 0.45967797493591017,
+    "area_wetted": 0.595314497066162,
+    "seconds": 17.023130178451538
+   },
+   {
+    "stations": 97,
+    "n_points": 40,
+    "CL": 0.22037916360721174,
+    "CD": 0.0749600007934137,
+    "L/D": 2.939956793951571,
+    "CL_wetted": 0.1701529094685333,
+    "CD_wetted": 0.05787598981678645,
+    "area_planform": 0.4596943122755387,
+    "area_wetted": 0.5953882796991523,
+    "seconds": 33.668246269226074
+   },
+   {
+    "stations": 49,
+    "n_points": 80,
+    "CL": 0.22035893251910127,
+    "CD": 0.07492694293532197,
+    "L/D": 2.9409838955970526,
+    "CL_wetted": 0.17015342280367896,
+    "CD_wetted": 0.05785595190045605,
+    "area_planform": 0.4596779749359101,
+    "area_wetted": 0.5953106683977281,
+    "seconds": 43.90208554267883
+   }
+  ],
+  "II": [
+   {
+    "stations": 13,
+    "n_points": 40,
+    "CL": 0.20281536994866764,
+    "CD": 0.06440198626829952,
+    "L/D": 3.1492098567229925,
+    "CL_wetted": 0.1684444002228468,
+    "CD_wetted": 0.05348782961009998,
+    "area_planform": 0.525716259807079,
+    "area_wetted": 0.6329883188740213,
+    "seconds": 4.474598407745361
+   },
+   {
+    "stations": 25,
+    "n_points": 40,
+    "CL": 0.20288109886333217,
+    "CD": 0.06454174158756794,
+    "L/D": 3.1434091159140833,
+    "CL_wetted": 0.16847652414339215,
+    "CD_wetted": 0.05359675369344988,
+    "area_planform": 0.5266396704805227,
+    "area_wetted": 0.6341847067142393,
+    "seconds": 8.931246280670166
+   },
+   {
+    "stations": 49,
+    "n_points": 40,
+    "CL": 0.20289811728886403,
+    "CD": 0.06457795307694252,
+    "L/D": 3.1419100114108227,
+    "CL_wetted": 0.1684844112685172,
+    "CD_wetted": 0.0536248366937989,
+    "area_planform": 0.5268709095526256,
+    "area_wetted": 0.6344866851339055,
+    "seconds": 18.5048987865448
+   },
+   {
+    "stations": 97,
+    "n_points": 40,
+    "CL": 0.20290242660002686,
+    "CD": 0.06458709261986886,
+    "L/D": 3.141532129247883,
+    "CL_wetted": 0.16848638784173098,
+    "CD_wetted": 0.053631916182906726,
+    "area_planform": 0.526928743439185,
+    "area_wetted": 0.6345623647029883,
+    "seconds": 36.45383834838867
+   },
+   {
+    "stations": 49,
+    "n_points": 80,
+    "CL": 0.20285210656646266,
+    "CD": 0.06455758664636015,
+    "L/D": 3.1421885033848267,
+    "CL_wetted": 0.16844931963994506,
+    "CD_wetted": 0.05360891603367785,
+    "area_planform": 0.5268709095526256,
+    "area_wetted": 0.6344749513965635,
+    "seconds": 36.430288791656494
+   }
+  ]
+ },
+ "sections": {
+  "I": {
+   "fig23a": {
+    "Y=0": {
+     "max_dev": 0.0019036216592349664,
+     "rms_dev": 0.0008562075703694386
+    },
+    "Y=0.1": {
+     "max_dev": 0.008972169154239706,
+     "rms_dev": 0.0020478367670776457
+    },
+    "Y=0.2": {
+     "max_dev": 0.019515881814269553,
+     "rms_dev": 0.004155018930896022
+    }
+   },
+   "fig23b": {
+    "X=0.80": {
+     "max_dev": 0.01692698918368052,
+     "rms_dev": 0.006787453974535994
+    },
+    "X=1.20": {
+     "max_dev": 0.010708586956793997,
+     "rms_dev": 0.004598381530408885
+    },
+    "X=1.60": {
+     "max_dev": 0.007414291159316688,
+     "rms_dev": 0.004279227240407663
+    }
+   }
+  },
+  "II": {
+   "fig27a": {
+    "Y=0": {
+     "max_dev": 0.0016278104267934967,
+     "rms_dev": 0.000893620144257604
+    },
+    "Y=0.1": {
+     "max_dev": 0.0038415099322557378,
+     "rms_dev": 0.0021214310735913856
+    },
+    "Y=0.2": {
+     "max_dev": 0.010858984247900438,
+     "rms_dev": 0.007148785265805617
+    }
+   },
+   "fig27b": {
+    "X=0.60": {
+     "max_dev": 0.020557079883758433,
+     "rms_dev": 0.012059753081357724
+    },
+    "X=1.00": {
+     "max_dev": 0.006494806995230418,
+     "rms_dev": 0.0031410021741689353
+    },
+    "X=1.40": {
+     "max_dev": 0.025699930104472246,
+     "rms_dev": 0.009235545331895136
+    }
+   }
+  },
+  "V8": {
+   "fig16a": {
+    "Y=0.1": {
+     "max_dev": 0.021867938044428215,
+     "rms_dev": 0.005918005888646793
+    },
+    "Y=0.2": {
+     "max_dev": 0.031195885855647365,
+     "rms_dev": 0.014318182293051252
+    },
+    "Y=0.3": {
+     "max_dev": 0.015135270884318652,
+     "rms_dev": 0.01156753314853037
+    }
+   },
+   "fig16b": {
+    "X=0.52": {
+     "max_dev": 0.032761360247264726,
+     "rms_dev": 0.014404487526077626
+    },
+    "X=1.00": {
+     "max_dev": 0.023456995564559602,
+     "rms_dev": 0.010013249156111056
+    },
+    "X=1.48": {
+     "max_dev": 0.02329193875836999,
+     "rms_dev": 0.011607773617593374
+    }
+   }
+  }
+ },
+ "tables": {
+  "I": {
+   "r1_ltocs": {
+    "CL": 0.2205,
+    "CD": 0.075,
+    "L/D": 2.9378
+   },
+   "r1_cfd": {
+    "CL": 0.2201,
+    "CD": 0.0749,
+    "L/D": 2.9377
+   },
+   "this_work_97_stations": {
+    "CL": 0.22037916360721174,
+    "CD": 0.0749600007934137,
+    "L/D": 2.939956793951571
+   },
+   "error_percent": {
+    "CL": -0.054801085164746244,
+    "CD": -0.053332275448403355,
+    "L/D": 0.07341527508921697
+   },
+   "wetted_reference": {
+    "CL": 0.1701529094685333,
+    "CD": 0.05787598981678645
+   }
+  },
+  "II": {
+   "r1_ltocs": {
+    "CL": 0.2034,
+    "CD": 0.0648,
+    "L/D": 3.1395
+   },
+   "r1_cfd": {
+    "CL": 0.2024,
+    "CD": 0.0645,
+    "L/D": 3.1386
+   },
+   "this_work_97_stations": {
+    "CL": 0.20290242660002686,
+    "CD": 0.06458709261986886,
+    "L/D": 3.141532129247883
+   },
+   "error_percent": {
+    "CL": -0.24462802358561353,
+    "CD": -0.3285607718073069,
+    "L/D": 0.06472779894515224
+   },
+   "wetted_reference": {
+    "CL": 0.16848638784173098,
+    "CD": 0.053631916182906726
+   }
+  }
+ },
+ "v8_statuses": [
+  "ok"
+ ],
+ "v9": [
+  {
+   "input": "flat shock (plane, beta 15 deg, M 6)",
+   "status": "ok",
+   "message": ""
+  },
+  {
+   "input": "concave cross-section",
+   "status": "concave",
+   "message": "concave shock cross-section (kappa_b < 0) at X = 0.808599 (spec flag 7: refused)"
+  },
+  {
+   "input": "cone beta 8 deg at M 6 (below the Mach angle)",
+   "status": "sub_mach",
+   "message": "shock angle at or below the Mach angle at X = 0.711537 (spec flag 7: refused)"
+  },
+  {
+   "input": "cone beta 75 deg at M 3 (beyond detachment)",
+   "status": "detached",
+   "message": "shock angle beyond detachment at X = 0.535898 (spec flag 7: refused)"
+  },
+  {
+   "input": "shock extension capped at 0.1 chords",
+   "status": "undetermined",
+   "message": "body not determined up to the base even with the shock extended 0.1 chords past it (spec flag 4)"
+  },
+  {
+   "input": "B-spline shock data ending at the base plane",
+   "status": "undetermined",
+   "message": "the shock data end at X = 0.997492, but the body is not determined up to the base plane from them (spec flag 4: extend the shock surface past the base plane)"
+  },
+  {
+   "input": "FCT point outside the shock at the base",
+   "status": "outside_shock",
+   "message": "FCT point lies outside the shock at the base plane"
+  }
+ ],
+ "run_time_s": 242.8235478401184
+}

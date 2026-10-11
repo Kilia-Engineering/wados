@@ -9,6 +9,8 @@ import os
 import json
 import shutil
 import numpy as np
+if not hasattr(np, "trapezoid"):  # NumPy < 2.0; np.trapz was removed in NumPy 2.x
+    np.trapezoid = np.trapz
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QGroupBox, QGridLayout, QSlider, QDoubleSpinBox,
@@ -120,7 +122,7 @@ def calculate_waverider_volume(waverider_obj):
         half_volume = np.trapezoid(areas, x_positions)
     except AttributeError:
         # Fallback for older numpy versions
-        half_volume = np.trapz(areas, x_positions)
+        half_volume = np.trapezoid(areas, x_positions)
     
     # Full volume (symmetric waverider - multiply by 2)
     return 2.0 * abs(half_volume)
@@ -252,6 +254,14 @@ try:
 except ImportError as e:
     print(f"GVWD waverider tab not available: {e}")
     GVWD_WAVERIDER_AVAILABLE = False
+
+# Import LTOCs (Local-Turning Osculating Cones, Zheng et al. 2020) waverider tab
+try:
+    from ltoc_waverider_tab import LTOCWaveriderTab
+    LTOC_WAVERIDER_AVAILABLE = True
+except ImportError as e:
+    print(f"LTOCs waverider tab not available: {e}")
+    LTOC_WAVERIDER_AVAILABLE = False
 
 # Import Claude assistant tab
 try:
@@ -549,7 +559,8 @@ class GeometrySchematicCanvas(FigureCanvas):
 class MeshSelectDialog(QDialog):
     """Dialog for selecting which mesh source to use for preview or analysis."""
 
-    def __init__(self, parent, last_stl_file, shadow_waverider_tab, title="Select Mesh"):
+    def __init__(self, parent, last_stl_file, shadow_waverider_tab, title="Select Mesh",
+                 ltoc_tab=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
@@ -601,9 +612,30 @@ class MeshSelectDialog(QDialog):
         layout.addWidget(self.radio_shadow)
         layout.addWidget(self.shadow_info)
 
+        # --- Source: LTOCs Waverider ---
+        self.radio_ltoc = QRadioButton("LTOCs Waverider")
+        self.ltoc_info = QLabel("")
+        self.ltoc_info.setStyleSheet("color: #888888; margin-left: 24px;")
+        self._ltoc_tab = ltoc_tab
+        self._has_ltoc = (ltoc_tab is not None
+                          and getattr(ltoc_tab, 'waverider', None) is not None)
+        if self._has_ltoc:
+            wr = ltoc_tab.waverider
+            self.ltoc_info.setText(
+                f"M={wr.M_inf:g}, {len(wr.stations)} stream surfaces, L={wr.length:.3g}")
+            if not self._has_imported and not self._has_shadow:
+                self.radio_ltoc.setChecked(True)
+        else:
+            self.radio_ltoc.setEnabled(False)
+            self.ltoc_info.setText("No waverider generated")
+            self.ltoc_info.setStyleSheet("color: #666666; margin-left: 24px;")
+        if ltoc_tab is not None:
+            layout.addWidget(self.radio_ltoc)
+            layout.addWidget(self.ltoc_info)
+
         # --- Source: Browse for STL ---
         self.radio_browse = QRadioButton("Browse for STL file\u2026")
-        if not self._has_imported and not self._has_shadow:
+        if not self._has_imported and not self._has_shadow and not self._has_ltoc:
             self.radio_browse.setChecked(True)
         layout.addWidget(self.radio_browse)
 
@@ -614,6 +646,7 @@ class MeshSelectDialog(QDialog):
         self._btn_group.addButton(self.radio_imported, 0)
         self._btn_group.addButton(self.radio_shadow, 1)
         self._btn_group.addButton(self.radio_browse, 2)
+        self._btn_group.addButton(self.radio_ltoc, 3)
 
         # OK / Cancel
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -669,6 +702,16 @@ class MeshSelectDialog(QDialog):
                 QMessageBox.warning(
                     self, "Mesh Error",
                     f"Failed to generate mesh from cone-derived waverider:\n\n{e}")
+
+        elif selected == 3:  # LTOCs waverider (binary STL, metres, GUI frame)
+            try:
+                self._result_path = self._ltoc_tab.stl_for_analysis()
+                self._result_source = "ltoc"
+                self.accept()
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Mesh Error",
+                    f"Failed to generate mesh from the LTOCs waverider:\n\n{e}")
 
         elif selected == 2:  # Browse
             filepath, _ = QFileDialog.getOpenFileName(
@@ -1176,7 +1219,7 @@ class WaveriderGUI(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # Left panel - OC Waverider parameters (hidden when cone-derived tab active)
+        # Left panel - OC Waverider parameters (shown only on the OC Waverider tab)
         self.oc_param_panel = self.create_parameter_panel()
         self.oc_param_panel.setMaximumWidth(380)
         main_layout.addWidget(self.oc_param_panel, 1)
@@ -1382,6 +1425,9 @@ class WaveriderGUI(QMainWindow):
         # Add VMPLO waverider params if tab exists
         if hasattr(self, 'vmplo_waverider_tab'):
             data['vmplo_waverider'] = self.vmplo_waverider_tab.get_params_dict()
+        # Add LTOCs waverider params if tab exists
+        if hasattr(self, 'ltoc_waverider_tab'):
+            data['ltoc_waverider'] = self.ltoc_waverider_tab.get_params_dict()
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
 
@@ -1399,6 +1445,8 @@ class WaveriderGUI(QMainWindow):
             self.hybrid_waverider_tab.set_params_dict(data['hybrid_waverider'])
         if 'vmplo_waverider' in data and hasattr(self, 'vmplo_waverider_tab'):
             self.vmplo_waverider_tab.set_params_dict(data['vmplo_waverider'])
+        if 'ltoc_waverider' in data and hasattr(self, 'ltoc_waverider_tab'):
+            self.ltoc_waverider_tab.set_params_dict(data['ltoc_waverider'])
 
     def _save_parameters(self):
         """Save parameters to a user-chosen JSON file."""
@@ -2472,9 +2520,16 @@ class WaveriderGUI(QMainWindow):
         button_layout.addWidget(generate_btn)
         
         export_btn = QPushButton("Export CAD")
+        export_btn.setToolTip("Export a STEP solid (with the LE blunting / thickness options above)")
         export_btn.clicked.connect(self.export_cad)
         export_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
         button_layout.addWidget(export_btn)
+
+        export_stl_btn = QPushButton("Export STL")
+        export_stl_btn.setToolTip("Export a closed triangulated STL (metres) of the generated geometry")
+        export_stl_btn.clicked.connect(self.export_stl_oc)
+        export_stl_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
+        button_layout.addWidget(export_stl_btn)
         
         layout.addLayout(button_layout)
         
@@ -2498,6 +2553,7 @@ class WaveriderGUI(QMainWindow):
 
         # ── Tab 1: OC Waverider (merged 3D View, Base Plane, LE, Schematic, Imported) ──
         tab_viz = self._create_visualization_tab()
+        self._oc_tab_index = self.tab_widget.count()
         self.tab_widget.addTab(tab_viz, "OC Waverider")
 
         # ── Tab 2: Aero Analysis ──
@@ -2578,6 +2634,13 @@ class WaveriderGUI(QMainWindow):
             self.gvwd_waverider_tab = GVWDWaveriderTab(parent=self)
             self._gvwd_tab_index = self.tab_widget.count()
             self.tab_widget.addTab(self.gvwd_waverider_tab, "GVWD Waverider")
+
+        # ── Tab 14: LTOCs (Local-Turning Osculating Cones, Zheng et al. 2020) ──
+        self._ltoc_tab_index = -1
+        if LTOC_WAVERIDER_AVAILABLE:
+            self.ltoc_waverider_tab = LTOCWaveriderTab(parent=self)
+            self._ltoc_tab_index = self.tab_widget.count()
+            self.tab_widget.addTab(self.ltoc_waverider_tab, "LTOCs Waverider")
 
         layout.addWidget(self.tab_widget)
         return panel
@@ -3288,12 +3351,12 @@ class WaveriderGUI(QMainWindow):
         return tab
 
     def _on_main_tab_changed(self, index):
-        """Show/hide OC parameter panel based on active tab.
-        The cone-derived tab has its own built-in parameter panel."""
-        if index == self._cone_tab_index:
-            self.oc_param_panel.hide()
-        else:
-            self.oc_param_panel.show()
+        """Show the OC parameter panel only on the OC Waverider tab.
+
+        Every other tab (Aero Analysis, Optimization and the method tabs) has
+        its own controls, so the OC panel would only take space there.
+        """
+        self.oc_param_panel.setVisible(index == self._oc_tab_index)
 
     def set_default_parameters(self):
         """Set default parameters from example"""
@@ -3938,7 +4001,7 @@ class WaveriderGUI(QMainWindow):
             QMessageBox.information(
                 self, "Export successful",
                 f"STEP file exported to:\n{filename}\n\n"
-                f"Units: METERS (SI)\n"
+                f"Units: MILLIMETRES (geometry scaled x1000 from metres; true size in CAD)\n"
                 f"{blunt_msg}\n"
                 f"To create STL mesh for analysis:\n"
                 f"1. Go to 'Aerodynamic Analysis' tab\n"
@@ -3954,6 +4017,54 @@ class WaveriderGUI(QMainWindow):
                 f"Failed to export CAD file:\n\n{str(e)}"
             )
             self.info_label.setText(f"Export error: {str(e)}")
+
+    def export_stl_oc(self):
+        """Export the generated OC waverider as a closed binary STL (metres)."""
+        if self.waverider is None:
+            QMessageBox.warning(self, "No waverider",
+                                "Generate a waverider before exporting STL.")
+            return
+
+        items = ["Full vehicle (mirrored, both sides)", "Half only (right side)"]
+        choice, ok = QInputDialog.getItem(
+            self, "Export options", "Select geometry to export:", items, 0, False)
+        if not ok:
+            return
+        full_span = "Full vehicle" in choice
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export waverider STL", "waverider.stl",
+            "STL files (*.stl);;All files (*)")
+        if not filename:
+            return
+
+        try:
+            from geometry_export import streams_to_mesh, write_stl
+            mesh = streams_to_mesh(self.waverider.upper_surface_streams,
+                                   self.waverider.lower_surface_streams,
+                                   full_span=full_span, kind="oc_waverider")
+            write_stl(mesh, filename)
+
+            notes = []
+            if self.blunting_check.isChecked():
+                notes.append("LE blunting")
+            if self.min_thickness_check.isChecked():
+                notes.append("minimum thickness")
+            if getattr(self, "lecomp_check", None) is not None and self.lecomp_check.isChecked():
+                notes.append("LE compensation")
+            note = ""
+            if notes:
+                note = ("\n\nThe STL is the sharp generated geometry; "
+                        + ", ".join(notes) + " are applied by 'Export CAD' (STEP) only.")
+            QMessageBox.information(
+                self, "Export successful",
+                f"STL file exported to:\n{filename}\n\n"
+                f"{mesh.n_faces} triangles, closed surface\n"
+                f"Units: METERS (SI)" + note)
+            self.info_label.setText(f"✓ STL file exported to: {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export error", f"Failed to export STL:\n\n{e}")
+            self.info_label.setText(f"Export error: {e}")
 
     def _export_cad_lecomp(self, filename, sides, min_thickness):
         """STEP export of the Mode B pre-compensated geometry (sharp LE)."""
@@ -4524,7 +4635,8 @@ class WaveriderGUI(QMainWindow):
         dialog = MeshSelectDialog(
             self, self.last_stl_file,
             getattr(self, 'shadow_waverider_tab', None),
-            title="Select Mesh to Preview")
+            title="Select Mesh to Preview",
+            ltoc_tab=getattr(self, 'ltoc_waverider_tab', None))
         if dialog.exec_() != QDialog.Accepted:
             return
         stl_path, source_name = dialog.get_result()
@@ -4618,7 +4730,8 @@ class WaveriderGUI(QMainWindow):
         dialog = MeshSelectDialog(
             self, self.last_stl_file,
             getattr(self, 'shadow_waverider_tab', None),
-            title="Select Mesh for PySAGAS Analysis")
+            title="Select Mesh for PySAGAS Analysis",
+            ltoc_tab=getattr(self, 'ltoc_waverider_tab', None))
         if dialog.exec_() != QDialog.Accepted:
             return
         stl_file, source_name = dialog.get_result()
@@ -4853,7 +4966,8 @@ class WaveriderGUI(QMainWindow):
         dialog = MeshSelectDialog(
             self, self.last_stl_file,
             getattr(self, 'shadow_waverider_tab', None),
-            title="Select Mesh for AeroDeck Sweep")
+            title="Select Mesh for AeroDeck Sweep",
+            ltoc_tab=getattr(self, 'ltoc_waverider_tab', None))
         if dialog.exec_() != QDialog.Accepted:
             return
         stl_file, source_name = dialog.get_result()

@@ -54,6 +54,7 @@ its own tab in the GUI; switch between them from the top tab bar.
 | **MFOF Waverider**     | Multi-Flowfield Osculating Framework — refactored production version of the VMOF method. |
 | **GVWD Waverider**     | Glide-Vehicle Wedge-Derived (HTV-2 / Fattah-2 / Avangard archetype) — five geometry modes. |
 | **PSWR-1 Waverider**   | Plasma-Sheath-Shaped Variable-Wedge waverider — variable-wedge β(y) for plasma-sheath shaping. |
+| **LTOCs Waverider**    | Local-Turning Osculating Cones (Zheng et al. 2020): waverider from a prescribed 3-D shock surface; reproduces the paper's published lift and drag to 0.4 %. See [`docs/ltoc/user_guide.md`](docs/ltoc/user_guide.md). |
 
 ### Experimental / research
 
@@ -82,7 +83,7 @@ the understanding that defaults and outputs may change between revisions.
 ```
 
 - **Geometry generators** live in dedicated subpackages (`gvwd/`, `pswr/`,
-  `liu2019/`, `mfof/`, `waverider_generator/`) or as standalone modules
+  `liu2019/`, `mfof/`, `ltoc/`, `waverider_generator/`) or as standalone modules
   (`planar_waverider.py`, `shadow_waverider.py`).
 - **Aero solver**: vendored [`pysagas/`](pysagas/), an oblique-shock + Prandtl–Meyer
   panel method.
@@ -101,6 +102,7 @@ wados/
 ├── gvwd/                       # Glide-Vehicle Wedge-Derived library
 ├── pswr/                       # Plasma-Sheath Variable-Wedge library
 ├── liu2019/  mfof/             # Variable-Mach osculating-flowfield libraries
+├── ltoc/                       # Local-turning osculating cones (LTOCs) library
 ├── waverider_generator/        # Osculating-cone generator
 ├── pysagas/                    # Vendored aero solver (panel method)
 ├── surrogate_model/            # Pre-trained ensemble surrogates (.pkl)
@@ -135,6 +137,8 @@ A common convention across all methods:
   and using surrogate models for fast design exploration.
 - [`gvwd/docs/`](gvwd/docs/) — GVWD library: validation suite, methodology,
   glossary.
+- [`docs/ltoc/user_guide.md`](docs/ltoc/user_guide.md) — LTOCs waverider: using the
+  tab and the library, validation, references; gate reports in [`docs/ltoc/`](docs/ltoc/).
 - [`docs/`](docs/) — additional notes and design references.
 
 ---
@@ -147,9 +151,12 @@ pytest gvwd/tests/
 
 # Vendored PySAGAS solver
 pytest pysagas/tests/
+
+# LTOCs library (the GUI tests run only where PyQt5 is installed)
+pytest ltoc/tests/
 ```
 
-CI runs both suites on every push and pull-request via
+CI runs these suites on every push and pull-request via
 [GitHub Actions](.github/workflows/tests.yml).
 
 ---

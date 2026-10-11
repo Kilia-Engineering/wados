@@ -797,21 +797,19 @@ class Liu2019WaveriderTab(QWidget):
         self.export_btn.setPopupMode(QToolButton.InstantPopup)
         self.export_btn.setEnabled(False)
         self.export_btn.setToolTip(
-            "Export the wetted surface in one of:\n"
-            "  • STL  — ASCII triangulated mesh (universal, for CFD/3D print)\n"
-            "  • OBJ  — Wavefront quadrilateral mesh (viewers, Blender)\n"
-            "  • STEP — CAD B-spline (for CAD editing / meshers), via OCP"
+            "Export the waverider in one of:\n"
+            "  • STL  — closed binary triangle mesh incl. base, metres (CFD / 3D print)\n"
+            "  • OBJ  — Wavefront quadrilateral mesh of the wetted surfaces (viewers)\n"
+            "  • STEP (solid) — closed faceted solid incl. base, millimetres\n"
+            "  • STEP (B-spline surfaces) — upper/lower B-spline faces as a shell, via OCP"
         )
         menu = QMenu(self.export_btn)
-        act_stl  = QAction("Export STL…",  menu)
-        act_obj  = QAction("Export OBJ…",  menu)
-        act_step = QAction("Export STEP…", menu)
-        act_stl.triggered.connect(lambda: self._on_export("stl"))
-        act_obj.triggered.connect(lambda: self._on_export("obj"))
-        act_step.triggered.connect(lambda: self._on_export("step"))
-        menu.addAction(act_stl)
-        menu.addAction(act_obj)
-        menu.addAction(act_step)
+        for label, fmt in (("Export STL…", "stl"), ("Export OBJ…", "obj"),
+                           ("Export STEP (solid)…", "step"),
+                           ("Export STEP (B-spline surfaces)…", "step_surfaces")):
+            act = QAction(label, menu)
+            act.triggered.connect(lambda _checked=False, f=fmt: self._on_export(f))
+            menu.addAction(act)
         self.export_btn.setMenu(menu)
         actions.addWidget(self.export_btn)
 
@@ -1020,7 +1018,27 @@ class Liu2019WaveriderTab(QWidget):
         "stl":  ("STL",  "*.stl",  "liu2019_waverider.stl"),
         "obj":  ("OBJ",  "*.obj",  "liu2019_waverider.obj"),
         "step": ("STEP", "*.step", "liu2019_waverider.step"),
+        "step_surfaces": ("STEP", "*.step", "liu2019_waverider_surfaces.step"),
     }
+
+    # Faceted STEP resolution: stations per half span x points per stream.
+    # A faceted STEP costs about 2.4 kB per triangle, so the full grid
+    # (hundreds of stations) would give files of hundreds of MB.
+    _STEP_SOLID_STATIONS = 21
+    _STEP_SOLID_POINTS = 25
+
+    def _closed_mesh(self, n_stations=None, n_points=None):
+        """Closed full-span mesh (incl. base) from the half-span surface grids."""
+        from geometry_export import grid_to_streams, select_stations, streams_to_mesh
+
+        S = self.waverider.surfaces
+        upper = grid_to_streams(S.X_upper, S.Y_upper, S.Z_upper)
+        lower = grid_to_streams(S.X_lower, S.Y_lower, S.Z_lower)
+        if n_stations is not None:
+            upper = select_stations(upper, n_stations)
+            lower = select_stations(lower, n_stations)
+        return streams_to_mesh(upper, lower, full_span=True, n_points=n_points,
+                               kind="liu2019_waverider")
 
     def _on_export(self, fmt: str):
         if self.waverider is None:
@@ -1033,14 +1051,31 @@ class Liu2019WaveriderTab(QWidget):
         if not path:
             return
         try:
+            note = ""
             if fmt == "stl":
-                self.waverider.export_stl(path)
+                from geometry_export import write_stl
+                mesh = self._closed_mesh()
+                write_stl(mesh, path)
+                note = (f"\n\nClosed surface incl. base, {mesh.n_faces} triangles\n"
+                        "Units: METRES; frame x streamwise, y up, z span")
             elif fmt == "obj":
                 self.waverider.export_obj(path)
             elif fmt == "step":
-                self.waverider.export_step(path)
+                from geometry_export import StepUnavailableError, write_step
+                mesh = self._closed_mesh(self._STEP_SOLID_STATIONS, self._STEP_SOLID_POINTS)
+                try:
+                    write_step(mesh, path)
+                except StepUnavailableError as e:
+                    raise RuntimeError(str(e)) from e
+                note = (f"\n\nFaceted closed solid, {mesh.n_faces} faces "
+                        f"({self._STEP_SOLID_STATIONS} stations per half span x "
+                        f"{self._STEP_SOLID_POINTS} points per stream)\nUnits: MILLIMETRES")
+            elif fmt == "step_surfaces":
+                self.waverider.export_step(path, scale=1000.0)
+                note = ("\n\nUpper and lower B-spline faces sewn as a shell (no base face)."
+                        "\nUnits: MILLIMETRES")
             QMessageBox.information(
-                self, f"Export {label}", f"{label} written:\n{path}")
+                self, f"Export {label}", f"{label} written:\n{path}{note}")
         except RuntimeError as e:
             QMessageBox.warning(
                 self, f"Export {label}",
