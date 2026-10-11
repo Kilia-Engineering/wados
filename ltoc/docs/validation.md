@@ -3,7 +3,7 @@
 This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate<N>_*`, which write `docs/ltoc/figures/gate<N>_*.png` and `gate<N>_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 84 passed, ~2 min (the 5 GUI tests need PyQt5 and are skipped in CI)
+pytest ltoc/tests/ -q        # 92 passed, ~2 min (the 8 GUI tests need PyQt5 and are skipped in CI)
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -232,7 +232,7 @@ The maxima occur on the steep parts of the curves, where 0.003 of position error
 
 ## Phase 5: integration (`ltoc/design.py`, `ltoc_waverider_tab.py`)
 
-Tests are in `ltoc/tests/test_ltoc_design.py` (CI) and `ltoc/tests/test_ltoc_gui.py` (offscreen Qt; skipped without PyQt5).
+Tests are in `ltoc/tests/test_ltoc_design.py` (CI) and `ltoc/tests/test_ltoc_gui.py` (offscreen Qt; skipped without PyQt5). The hub tests point the session file at a temporary directory, so they never read or write the user's `last_session.json`.
 
 | Check | Result | Test |
 |---|---|---|
@@ -243,4 +243,6 @@ Tests are in `ltoc/tests/test_ltoc_design.py` (CI) and `ltoc/tests/test_ltoc_gui
 | Build cancellable from the progress callback | `LTOCError("cancelled")` | `test_build_can_be_cancelled_from_the_progress_callback` |
 | OC-design import reproduces the OC waverider | LE to 1e−9; lower surface within the OC generator's accuracy (V5) | `test_oc_design_import_reproduces_the_oc_waverider` |
 | Tab: presets fill inputs; editing makes a custom shock; background run fills the views; refusals listed with exports disabled; OC import without a design gives an input error | yes | `test_ltoc_gui.py` (4 tests) |
+| Project files: `LTOCDesign.to_dict`/`from_dict` round trip through JSON for every preset and a custom shock; defaults for missing entries, unknown entries ignored; newer version or malformed shock rejected | yes | `test_design_round_trips_through_json`, `test_design_dict_defaults_unknown_keys_and_oc_import`, `test_malformed_design_dicts_are_rejected` |
+| Project files: tab inputs round trip (preset, custom, OC import); a renamed or edited preset loads as a custom shock; hub "Save/Load Parameters" and the start-up session restore the tab; projects without an LTOCs section leave it unchanged | yes | `test_tab_params_round_trip_presets_custom_and_oc_import`, `test_renamed_or_edited_presets_load_as_custom_shocks`, `test_hub_project_files_save_and_restore_the_ltoc_tab` |
 | Aero Analysis mesh dialog offers the LTOCs waverider and returns its STL; unchanged without an LTOCs tab | yes; the STL reads in meshio (PySAGAS) and numpy-stl | `test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider` |

@@ -101,3 +101,39 @@ def test_oc_design_import_reproduces_the_oc_waverider():
         dev = np.hypot(np.interp(S[:, 0], P[:, 0], P[:, 1]) - S[:, 1],
                        np.interp(S[:, 0], P[:, 0], P[:, 2]) - S[:, 2])
         assert np.max(dev) < 2e-3 * oc.length
+
+
+# ---------------------------------------------------------------------------
+#  Project files: LTOCDesign.to_dict / from_dict (section "ltoc_waverider")
+# ---------------------------------------------------------------------------
+
+def test_design_round_trips_through_json():
+    import json
+
+    for name in PRESETS:
+        d = LTOCDesign.from_preset(name, n_stations=31, clustering="uniform", n_points=55)
+        saved = json.loads(json.dumps(d.to_dict(source=name)))
+        assert saved["version"] == 1 and saved["source"] == name
+        assert LTOCDesign.from_dict(saved) == d
+    custom = LTOCDesign(shock=EllipticShock(0.05, 0.1, 0.1, 1.2, 0.5, 0.55), M_inf=8.0, fct_z=0.2)
+    assert LTOCDesign.from_dict(json.loads(json.dumps(custom.to_dict()))) == custom
+
+
+def test_design_dict_defaults_unknown_keys_and_oc_import():
+    d = LTOCDesign.from_dict({"shock": {"x_p": 0, "a_p": 0, "b_p": 0, "x_q": 1, "a_q": 0.2, "b_q": 0.2},
+                              "future_option": 3})
+    assert (d.n_stations, d.n_points, d.clustering, d.M_inf) == (25, 40, "symmetry", 6.0)
+    saved = {"version": 1, "source": "oc_import", "shock": None, "M_inf": 5.0}
+    assert LTOCDesign.from_dict(saved).oc_waverider is None          # numbers only
+    marker = object()
+    assert LTOCDesign.from_dict(saved, oc_waverider=marker).oc_waverider is marker
+
+
+@pytest.mark.parametrize("bad, message", [
+    ({"version": 2}, "newer"),
+    ({"shock": {"x_p": 0.0, "a_p": 0.0}}, "malformed"),
+    ({"shock": {"x_p": "a", "a_p": 0, "b_p": 0, "x_q": 1, "a_q": 1, "b_q": 1}}, "malformed"),
+])
+def test_malformed_design_dicts_are_rejected(bad, message):
+    with pytest.raises(ValueError, match=message):
+        LTOCDesign.from_dict(bad)

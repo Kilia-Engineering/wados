@@ -114,3 +114,91 @@ def test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider(app, tab):
     # Without an LTOCs tab the dialog is unchanged (no LTOCs entry is enabled).
     plain = W.MeshSelectDialog(None, None, None, title="Select Mesh")
     assert not plain.radio_ltoc.isEnabled() and plain.radio_browse.isChecked()
+
+
+# ---------------------------------------------------------------------------
+#  Project files ("Save/Load Parameters", section "ltoc_waverider")
+# ---------------------------------------------------------------------------
+
+def test_tab_params_round_trip_presets_custom_and_oc_import(tab):
+    from ltoc_waverider_tab import CUSTOM, OC_IMPORT
+
+    tab.source_combo.setCurrentText("Circular cone, beta 12 deg, M 6")   # values rounded in the widgets
+    tab.stations_spin.setValue(31)
+    tab.points_spin.setValue(55)
+    tab.cluster_combo.setCurrentIndex(1)
+    saved = tab.get_params_dict()
+    tab.source_combo.setCurrentIndex(0)
+    tab.stations_spin.setValue(9)
+    tab.set_params_dict(saved)
+    assert tab.source_combo.currentText() == "Circular cone, beta 12 deg, M 6"
+    assert (tab.stations_spin.value(), tab.points_spin.value(), tab.cluster_combo.currentIndex()) == (31, 55, 1)
+    assert tab.get_params_dict() == saved
+
+    tab.source_combo.setCurrentText("R1 waverider case I (Eq. 23), M 6")
+    tab.shock_spins["a_q"].setValue(0.61)                                # becomes custom
+    saved = tab.get_params_dict()
+    assert saved["source"] == "custom"
+    tab.source_combo.setCurrentIndex(1)
+    tab.set_params_dict(saved)
+    assert tab.source_combo.currentText() == CUSTOM and tab.shock_spins["a_q"].value() == 0.61
+
+    tab.source_combo.setCurrentText(OC_IMPORT)
+    saved = tab.get_params_dict()
+    tab.source_combo.setCurrentIndex(0)
+    tab.set_params_dict(saved)
+    assert tab.source_combo.currentText() == OC_IMPORT and not tab.fct_spin.isEnabled()
+    tab.source_combo.setCurrentIndex(0)
+
+
+def test_renamed_or_edited_presets_load_as_custom_shocks(tab):
+    from ltoc_waverider_tab import CUSTOM
+
+    tab.source_combo.setCurrentText("R1 waverider case II (Eq. 25), M 7")
+    saved = tab.get_params_dict()
+    renamed = dict(saved, source="R1 case II (old name)")
+    tab.source_combo.setCurrentIndex(0)
+    tab.set_params_dict(renamed)
+    assert tab.source_combo.currentText() == CUSTOM and tab.shock_spins["b_q"].value() == 0.8
+    edited = dict(saved, shock=dict(saved["shock"], a_q=0.7))           # preset name, other numbers
+    tab.set_params_dict(edited)
+    assert tab.source_combo.currentText() == CUSTOM and tab.shock_spins["a_q"].value() == 0.7
+    tab.source_combo.setCurrentIndex(0)
+
+
+def test_hub_project_files_save_and_restore_the_ltoc_tab(app, tmp_path, monkeypatch):
+    import json
+
+    import waverider_gui as W
+
+    session = tmp_path / "last_session.json"                          # never the user's file
+    monkeypatch.setattr(W.WaveriderGUI, "_params_file_path", lambda self: str(session))
+    hub = W.WaveriderGUI()
+    t = hub.ltoc_waverider_tab
+    t.source_combo.setCurrentText("R1 waverider case II (Eq. 25), M 7")
+    t.stations_spin.setValue(33)
+    project = tmp_path / "project.json"
+    hub._write_params_to_file(str(project))
+    data = json.loads(project.read_text())
+    assert data["ltoc_waverider"]["source"] == "R1 waverider case II (Eq. 25), M 7"
+    assert data["ltoc_waverider"]["n_stations"] == 33 and "oc_waverider" in data
+
+    t.source_combo.setCurrentIndex(0)
+    t.stations_spin.setValue(9)
+    hub._read_params_from_file(str(project))
+    assert t.source_combo.currentText() == "R1 waverider case II (Eq. 25), M 7"
+    assert t.stations_spin.value() == 33
+
+    # A project saved before LTOCs existed leaves the tab as it is.
+    data.pop("ltoc_waverider")
+    old = tmp_path / "old_project.json"
+    old.write_text(json.dumps(data))
+    t.stations_spin.setValue(11)
+    hub._read_params_from_file(str(old))
+    assert t.stations_spin.value() == 11
+
+    # The session file written on close restores the tab at the next start.
+    hub._auto_save_params()
+    hub2 = W.WaveriderGUI()
+    assert hub2.ltoc_waverider_tab.stations_spin.value() == 11
+    assert hub2.ltoc_waverider_tab.source_combo.currentText() == "R1 waverider case II (Eq. 25), M 7"

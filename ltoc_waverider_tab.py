@@ -405,6 +405,62 @@ class LTOCWaveriderTab(QWidget):
                           n_stations=self.stations_spin.value(), clustering=clustering, **common)
 
     # ------------------------------------------------------------------
+    #  Project files (WADOS "Save/Load Parameters", section "ltoc_waverider")
+    # ------------------------------------------------------------------
+    def get_params_dict(self) -> dict:
+        """The tab's inputs as a JSON-serialisable dict (``LTOCDesign.to_dict``).
+
+        Reads the widgets only, so it works whatever their state. With the OC
+        import, the OC design itself is saved in the project's "oc_waverider"
+        section; regenerate it after loading, then generate here.
+        """
+        name = self.source_combo.currentText()
+        source = {CUSTOM: "custom", OC_IMPORT: "oc_import"}.get(name, name)
+        shock = EllipticShock(**{k: sb.value() for k, sb in self.shock_spins.items()})
+        clustering = "symmetry" if self.cluster_combo.currentIndex() == 0 else "uniform"
+        design = LTOCDesign(shock=shock, M_inf=self.mach_spin.value(), fct_z=self.fct_spin.value(),
+                            n_stations=self.stations_spin.value(), clustering=clustering,
+                            n_points=self.points_spin.value())
+        return design.to_dict(source=source)
+
+    def set_params_dict(self, d: dict) -> None:
+        """Restore inputs saved by :meth:`get_params_dict`.
+
+        A preset that no longer exists, or whose numbers differ from the saved
+        ones, is restored as a custom shock with the saved numbers. Values
+        outside a widget's range are clipped by the widget. The current result
+        is kept until the next 'Generate'.
+        """
+        design = LTOCDesign.from_dict(d)                 # ValueError for a malformed section
+        source = str(d.get("source", "custom"))
+        name = {"custom": CUSTOM, "oc_import": OC_IMPORT}.get(source, source)
+        if self.source_combo.findText(name) < 0:
+            name = CUSTOM
+        self.source_combo.setCurrentText(name)           # enables/fills the widgets for the source
+        self._filling = True
+        try:
+            if design.shock is not None:
+                for key, sb in self.shock_spins.items():
+                    sb.setValue(getattr(design.shock, key))
+            self.mach_spin.setValue(design.M_inf)
+            self.fct_spin.setValue(design.fct_z)
+            self.stations_spin.setValue(design.n_stations)
+            self.cluster_combo.setCurrentIndex(0 if design.clustering == "symmetry" else 1)
+            self.points_spin.setValue(design.n_points)
+        finally:
+            self._filling = False
+        if name in PRESETS and not self._matches_preset(name):
+            self.source_combo.setCurrentText(CUSTOM)
+
+    def _matches_preset(self, name: str) -> bool:
+        """True when the shock, Mach and FCT widgets hold the preset's values."""
+        shock, M, z, _ = PRESETS[name]
+        pairs = [(sb, getattr(shock, k)) for k, sb in self.shock_spins.items()]
+        pairs += [(self.mach_spin, M), (self.fct_spin, z)]
+        return all(abs(sb.value() - round(v, sb.decimals())) < 0.5 * 10 ** -sb.decimals()
+                   for sb, v in pairs)
+
+    # ------------------------------------------------------------------
     #  Run
     # ------------------------------------------------------------------
     def generate(self):

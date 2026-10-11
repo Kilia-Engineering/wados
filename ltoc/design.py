@@ -22,8 +22,8 @@ All plotting data are in the GUI frame (x streamwise, y up, z span).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from dataclasses import asdict, dataclass, field, fields
+from typing import Callable, ClassVar, Optional
 
 import numpy as np
 
@@ -197,6 +197,63 @@ class LTOCDesign:
         elif self.clustering != "uniform":
             raise ValueError("clustering must be 'symmetry' or 'uniform'")
         return np.column_stack([y_tip * u, np.full_like(u, self.fct_z)])
+
+    #: Version of the dictionary written by :meth:`to_dict`.
+    DICT_VERSION: ClassVar[int] = 1
+
+    def to_dict(self, source: Optional[str] = None) -> dict:
+        """JSON-serialisable inputs, for WADOS project files (section "ltoc_waverider").
+
+        ``source`` records where the shock came from in the GUI: a preset name,
+        "custom" or "oc_import". The shock numbers are always stored, so a
+        design still loads if a preset is later renamed. An imported OC design
+        is not stored here; its parameters are in the project's own
+        "oc_waverider" section, and the import is redone after loading.
+        """
+        if source is None:
+            source = "oc_import" if self.oc_waverider is not None else "custom"
+        return {
+            "version": self.DICT_VERSION,
+            "source": source,
+            "shock": asdict(self.shock) if self.shock is not None else None,
+            "M_inf": float(self.M_inf),
+            "fct_z": float(self.fct_z),
+            "n_stations": int(self.n_stations),
+            "clustering": self.clustering,
+            "n_points": int(self.n_points),
+            "gamma": float(self.gamma),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, oc_waverider: Optional[object] = None) -> "LTOCDesign":
+        """Inverse of :meth:`to_dict`.
+
+        Missing entries take the defaults and unknown entries are ignored. A
+        design saved with source "oc_import" gets ``oc_waverider`` if one is
+        given; otherwise only its numbers are restored. Raises ``ValueError``
+        for a newer format version or a malformed shock entry.
+        """
+        version = int(d.get("version", 1))
+        if version > cls.DICT_VERSION:
+            raise ValueError(f"LTOCs design format version {version} is newer than this "
+                             f"WADOS supports ({cls.DICT_VERSION})")
+        shock = d.get("shock")
+        if shock is not None:
+            try:
+                shock = EllipticShock(**{f.name: float(shock[f.name]) for f in fields(EllipticShock)})
+            except (KeyError, TypeError, ValueError) as e:
+                raise ValueError(f"malformed LTOCs shock entry: {e!r}") from None
+        base = cls()
+        design = cls(shock=shock,
+                     M_inf=float(d.get("M_inf", base.M_inf)),
+                     fct_z=float(d.get("fct_z", base.fct_z)),
+                     n_stations=int(d.get("n_stations", base.n_stations)),
+                     clustering=str(d.get("clustering", base.clustering)),
+                     n_points=int(d.get("n_points", base.n_points)),
+                     gamma=float(d.get("gamma", base.gamma)))
+        if d.get("source") == "oc_import":
+            design.oc_waverider = oc_waverider
+        return design
 
     def validate(self) -> None:
         if self.oc_waverider is None and self.shock is None:

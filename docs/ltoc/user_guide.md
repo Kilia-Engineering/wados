@@ -58,6 +58,12 @@ Editing a preset's numbers turns it into a custom shock. With the OC import, the
 
 Both use the GUI frame (x streamwise, y up, z span).
 
+**Project files.** *File → Save/Load Parameters* and the session restored at start-up (`last_session.json`) include the tab's inputs, in the section `ltoc_waverider`:
+- the shock source (preset name, `custom` or `oc_import`) and the six shock numbers;
+- Mach number, FCT Z, stations, spacing and points.
+
+The shock numbers are always stored. A preset that was renamed, or whose numbers differ from the saved ones, therefore loads as a custom shock with the saved numbers. For the OC import, the OC design is stored in the project's own `oc_waverider` section: after loading, generate it in the OC Waverider tab first. A loaded design is not solved automatically; click *Generate*.
+
 The **Aero Analysis** tab can load the waverider directly: choose *LTOCs Waverider* in its mesh dialog for the preview, the PySAGAS analysis or the AeroDeck sweep.
 
 ---
@@ -95,7 +101,7 @@ Lower-level pieces, for other shock surfaces:
   - Second order on planar stream surfaces (cones, osculating cones, the symmetry plane).
   - First order where the stream surfaces twist: about 1e−4 L at 40–80 points on R1 case II (Gate 3 report §3).
   - Forces are converged to < 0.03 % at 40 points.
-- **Not covered in version 1:** concave shock cross-sections, sideslip (R1 test case I), viscous forces, and saving LTOCs designs in WADOS project files.
+- **Not covered in version 1:** concave shock cross-sections, sideslip (R1 test case I) and viscous forces.
 
 Validation: [`ltoc/docs/validation.md`](../../ltoc/docs/validation.md) (V1–V9), and the gate reports [0](gate0_report.md), [1](gate1_report.md), [2](gate2_report.md), [3](gate3_report.md), [4](gate4_report.md) and [5](gate5_report.md).
 

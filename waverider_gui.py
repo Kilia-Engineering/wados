@@ -1425,6 +1425,9 @@ class WaveriderGUI(QMainWindow):
         # Add VMPLO waverider params if tab exists
         if hasattr(self, 'vmplo_waverider_tab'):
             data['vmplo_waverider'] = self.vmplo_waverider_tab.get_params_dict()
+        # Add LTOCs waverider params if tab exists
+        if hasattr(self, 'ltoc_waverider_tab'):
+            data['ltoc_waverider'] = self.ltoc_waverider_tab.get_params_dict()
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
 
@@ -1442,6 +1445,8 @@ class WaveriderGUI(QMainWindow):
             self.hybrid_waverider_tab.set_params_dict(data['hybrid_waverider'])
         if 'vmplo_waverider' in data and hasattr(self, 'vmplo_waverider_tab'):
             self.vmplo_waverider_tab.set_params_dict(data['vmplo_waverider'])
+        if 'ltoc_waverider' in data and hasattr(self, 'ltoc_waverider_tab'):
+            self.ltoc_waverider_tab.set_params_dict(data['ltoc_waverider'])
 
     def _save_parameters(self):
         """Save parameters to a user-chosen JSON file."""
