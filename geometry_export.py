@@ -36,6 +36,7 @@ __all__ = [
     "select_stations",
     "streams_to_mesh",
     "mesh_volume",
+    "mesh_planform_area",
     "stream_volume",
     "span_frame_to_gui",
     "write_stl",
@@ -163,6 +164,19 @@ def mesh_volume(mesh) -> float:
     v = np.asarray(mesh.vertices, dtype=float)
     t = v[np.asarray(mesh.faces, dtype=int)]
     return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+
+
+def mesh_planform_area(mesh) -> float:
+    """Planform area (projection on the x-z plane) of a closed mesh.
+
+    Both the upper and the lower surface project onto the planform, so the
+    summed projection of all triangles is halved.
+    """
+    v = np.asarray(mesh.vertices, dtype=float)
+    t = v[np.asarray(mesh.faces, dtype=int)]
+    a = t[:, 1] - t[:, 0]
+    b = t[:, 2] - t[:, 0]
+    return float(0.25 * np.abs(a[:, 0] * b[:, 2] - a[:, 2] * b[:, 0]).sum())
 
 
 def stream_volume(upper_streams: Sequence[np.ndarray], lower_streams: Sequence[np.ndarray], *,

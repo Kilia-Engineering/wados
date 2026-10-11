@@ -87,13 +87,15 @@ the understanding that defaults and outputs may change between revisions.
   (`planar_waverider.py`, `shadow_waverider.py`).
 - **Aero solver**: vendored [`pysagas/`](pysagas/), an oblique-shock + Prandtl–Meyer
   panel method.
-- **Optimization**: `optimization_engine.py` (NSGA-II via pymoo) and
-  `surrogate_tab.py` / `ai_surrogate.py` (sklearn / PyTorch ensembles).
+- **Optimization**: `optimization_engine.py` (NSGA-II via pymoo, OC waverider),
+  `method_optimization.py` (NSGA-II for any design tab, via *Send to
+  Optimization*), and `surrogate_tab.py` / `ai_surrogate.py` (sklearn / PyTorch
+  ensembles).
 - **Long-running work** runs in `QThread` workers — the GUI never blocks.
 - **Design tab → Aero Analysis**: every design tab has *Send to Aero Analysis*,
   which loads its closed full-span mesh (and its planform area as A_ref) into
   the Aero Analysis tab; that tab's mesh dialog also lists every tab with a
-  design (`aero_handoff.py`).
+  design (`handoff.py`).
 
 ---
 

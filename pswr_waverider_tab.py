@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QFileDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -719,13 +719,16 @@ class PSWRWaveriderTab(QWidget):
         self.export_step_btn.setToolTip(
             "Faceted full-span STEP solid in millimetres (needs cadquery)")
         self.export_step_btn.clicked.connect(self.export_step)
-        self.send_aero_btn = aero_handoff.send_button(self)
+        self.send_aero_btn = handoff.send_button(self)
         for b in (self.export_stl_btn, self.export_step_btn, self.send_aero_btn):
             b.setStyleSheet(export_style)
             b.setEnabled(False)
             export_row.addWidget(b)
         export_wrap = QWidget(); export_wrap.setLayout(export_row)
         left_layout.addWidget(export_wrap)
+        self.send_opt_btn = handoff.optimize_button(self)
+        self.send_opt_btn.setStyleSheet(export_style)
+        left_layout.addWidget(self.send_opt_btn)
 
         self.status_label = QLabel("Ready")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -1684,6 +1687,30 @@ class PSWRWaveriderTab(QWidget):
         lower = [to_gui_frame(s) for s in wr.lower_surface_streams]
         return streams_to_mesh(upper, lower, full_span=False, n_points=n_points,
                                kind="pswr1_waverider")
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the three shock-angle knots, the sweep and the flat fraction may vary;
+        Mach number, length and resolution stay."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around("beta0_deg", "Shock angle at the centre (deg)", p["beta0_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("beta1_deg", "Shock angle at mid-span (deg)", p["beta1_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("beta2_deg", "Shock angle at the tip (deg)", p["beta2_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("lambda_deg", "Leading-edge sweep Lambda (deg)", p["lambda_deg"], span=5.0, lower=20.0, upper=89.0),
+            V.around("flat_fraction", "Flat fraction", p["flat_fraction"], span=0.15, lower=0.0, upper=0.6,
+                     enabled=False),
+        ]
+        notes = ("Shock angles outside the Mach angle–detachment range fail and are "
+                 "penalised.")
+        return OptimizationCase("pswr", "PSWR-1 Waverider", p, variables, p["M_inf"], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
 
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab

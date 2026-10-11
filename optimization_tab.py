@@ -13,7 +13,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QGridLayout, QSlider,
                              QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox,
                              QProgressBar, QTextEdit, QTabWidget, QFileDialog,
-                             QMessageBox, QSplitter, QFrame)
+                             QMessageBox, QSplitter, QFrame, QTableWidget,
+                             QTableWidgetItem, QHeaderView, QAbstractScrollArea,
+                             QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QFont
 import numpy as np
@@ -28,6 +30,11 @@ sys.path.insert(0, script_dir)
 # These will be imported in the worker thread
 # from optimization_engine import WaveriderProblem
 # from optimization_utils import OptimizationResults
+
+
+# Rough seconds per design for the time estimate (mesh + PySAGAS, one core)
+METHOD_SECONDS = {"ltoc": 10, "gvwd": 1, "pswr": 2, "planar": 4, "shadow": 2,
+                  "hybrid": 3, "vmn": 3, "vmof": 4, "vmplo": 4, "mfof": 5}
 
 
 class OptimizationWorker(QThread):
@@ -84,7 +91,7 @@ class OptimizationWorker(QThread):
             self.log_message.emit(f"📁 Results folder: {results.results_folder}")
             
             # Initialize CSV with proper headers
-            design_var_names = ['X1', 'X2', 'X3', 'X4']
+            design_var_names = [v['name'] for v in design_vars] or ['X1', 'X2', 'X3', 'X4']
             objective_names = [obj['name'] for obj in objectives]
             constraint_names = [c['name'] for c in constraints if c.get('active', True) and c['name'] != 'design_space']
             results.initialize_designs_csv(design_var_names, objective_names, constraint_names)
@@ -93,30 +100,59 @@ class OptimizationWorker(QThread):
             
             # Create problem
             self.log_message.emit("🔧 Creating optimization problem...")
-            self.log_message.emit(f"   M_inf={fixed_params['M_inf']}, β={fixed_params['beta']}°")
-            self.log_message.emit(f"   height={fixed_params['height']}m, width={fixed_params['width']}m")
-            self.log_message.emit(f"   α={sim_params.get('aoa', 0.0)}°, P∞={sim_params.get('pressure', 2549.0):.1f} Pa, T∞={sim_params.get('temperature', 221.55):.2f} K")
-            self.log_message.emit(f"   mesh_size={algorithm_params.get('mesh_size', 0.1)}")
-            
-            problem = WaveriderProblem(
-                objectives=objectives,
-                constraints=constraints,
-                M_inf=fixed_params['M_inf'],
-                beta=fixed_params['beta'],
-                height=fixed_params['height'],
-                width=fixed_params['width'],
-                aoa=sim_params.get('aoa', 0.0),
-                pressure=sim_params.get('pressure'),
-                temperature=sim_params.get('temperature'),
-                A_ref=sim_params.get('A_ref'),
-                mesh_size=algorithm_params.get('mesh_size', 0.1),
-                n_cores=algorithm_params['n_cores'],
-                match_shockwave=sim_params.get('match_shockwave', False),
-                verbose=True  # Enable verbose mode to see errors
-            )
-            self.log_message.emit("✓ Problem created successfully")
-            self.log_message.emit(f"   Reference area: {problem.A_ref:.4f} m²")
-            self.log_message.emit("")
+            method_case = None
+            if self.config.get('method_case'):
+                # A design tab's case (method_optimization): its own builder,
+                # PySAGAS on the closed mesh, A_ref = each design's planform area
+                from method_optimization import MethodProblem, OptimizationCase, evaluate_design
+                method_case = OptimizationCase.from_dict(self.config['method_case'])
+                flow = {'mach': fixed_params['M_inf'],
+                        'pressure': sim_params.get('pressure', 2549.0),
+                        'temperature': sim_params.get('temperature', 221.55),
+                        'aoa': sim_params.get('aoa', 0.0)}
+                self.log_message.emit(f"   Method: {method_case.title}")
+                self.log_message.emit(f"   Flight: M∞={flow['mach']:g}, α={flow['aoa']}°, "
+                                      f"P∞={flow['pressure']:.1f} Pa, T∞={flow['temperature']:.2f} K")
+                for v in method_case.active():
+                    self.log_message.emit(f"   {v.label}: {v.lower:g} to {v.upper:g} (now {v.value:g})")
+                problem = MethodProblem(method_case, objectives, constraints, flow=flow,
+                                        n_cores=algorithm_params['n_cores'])
+                self.log_message.emit("✓ Problem created successfully")
+                self.log_message.emit("   Reference area: each design's planform area")
+                base = evaluate_design(method_case.method, method_case.params(), flow)
+                if base['success']:
+                    self.log_message.emit(
+                        f"   Starting design: CL/CD={base['CL'] / base['CD']:.3f}, "
+                        f"CL={base['CL']:.4f}, CD={base['CD']:.5f}, Volume={base['Volume']:.4g} m³, "
+                        f"Volumetric Efficiency={base['VolEff']:.4f} ({base['time']:.1f} s)")
+                else:
+                    self.log_message.emit(f"   ⚠ Starting design failed: {base['error']}")
+                self.log_message.emit("")
+            else:
+                self.log_message.emit(f"   M_inf={fixed_params['M_inf']}, β={fixed_params['beta']}°")
+                self.log_message.emit(f"   height={fixed_params['height']}m, width={fixed_params['width']}m")
+                self.log_message.emit(f"   α={sim_params.get('aoa', 0.0)}°, P∞={sim_params.get('pressure', 2549.0):.1f} Pa, T∞={sim_params.get('temperature', 221.55):.2f} K")
+                self.log_message.emit(f"   mesh_size={algorithm_params.get('mesh_size', 0.1)}")
+                problem = WaveriderProblem(
+                    objectives=objectives,
+                    constraints=constraints,
+                    M_inf=fixed_params['M_inf'],
+                    beta=fixed_params['beta'],
+                    height=fixed_params['height'],
+                    width=fixed_params['width'],
+                    aoa=sim_params.get('aoa', 0.0),
+                    pressure=sim_params.get('pressure'),
+                    temperature=sim_params.get('temperature'),
+                    A_ref=sim_params.get('A_ref'),
+                    mesh_size=algorithm_params.get('mesh_size', 0.1),
+                    n_cores=algorithm_params['n_cores'],
+                    match_shockwave=sim_params.get('match_shockwave', False),
+                    bounds=[(v['min'], v['max']) for v in design_vars] if len(design_vars) == 4 else None,
+                    verbose=True  # Enable verbose mode to see errors
+                )
+                self.log_message.emit("✓ Problem created successfully")
+                self.log_message.emit(f"   Reference area: {problem.A_ref:.4f} m²")
+                self.log_message.emit("")
             
             # Setup algorithm with genetic operators
             from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -139,6 +175,7 @@ class OptimizationWorker(QThread):
             
             # Callback to track progress
             design_counter = [0]  # Use list to allow modification in nested function
+            from method_optimization import objective_value
             
             def callback_func(algorithm):
                 if self.should_stop:
@@ -157,20 +194,20 @@ class OptimizationWorker(QThread):
                 else:
                     self.log_message.emit(f"📈 Generation {gen}/{n_gen} complete")
                 
-                # Get population from current generation
-                pop = algorithm.pop
+                # The designs evaluated in this generation, with their results
+                # (the population after survival is a different set)
+                batch_X = getattr(problem, 'last_eval_X', None)
+                batch_results = getattr(problem, 'last_eval_results', None) or []
+                if batch_X is None or len(batch_X) != len(batch_results):
+                    batch_X = [ind.X for ind in algorithm.pop]
+                    batch_results = [None] * len(batch_X)
                 
                 # Count successes and failures
                 n_success = 0
                 n_failed = 0
                 
-                # Log each design in this generation
-                for i, ind in enumerate(pop):
-                    if problem.last_eval_success is not None and i < len(problem.last_eval_success):
-                        success = problem.last_eval_success[i]
-                    else:
-                        success = True
-                    
+                for i, (X_vals, actual_result) in enumerate(zip(batch_X, batch_results)):
+                    success = bool(actual_result and actual_result.get('success', False))
                     if success:
                         n_success += 1
                     else:
@@ -178,79 +215,40 @@ class OptimizationWorker(QThread):
                     
                     design_counter[0] += 1
                     design_id = design_counter[0]
-                    
-                    # Extract metrics
-                    X_vals = ind.X
-                    F_vals = ind.F
-                    G_vals = ind.G if ind.G is not None else []
+                    x_str = ", ".join(f"{float(v):.4g}" for v in X_vals)
                     
                     # Log first few designs in detail
                     if i < 3 or not success:
-                        self.log_message.emit(f"   Design {design_id}: X=[{X_vals[0]:.3f}, {X_vals[1]:.3f}, {X_vals[2]:.3f}, {X_vals[3]:.3f}]")
-                        self.log_message.emit(f"      F={F_vals}, Success={success}")
-                        # Log error if available
-                        if hasattr(problem, 'last_eval_errors') and i < len(problem.last_eval_errors):
-                            err = problem.last_eval_errors[i]
-                            if err:
-                                self.log_message.emit(f"      Error: {err}")
+                        self.log_message.emit(f"   Design {design_id}: X=[{x_str}]")
+                        if success:
+                            self.log_message.emit(
+                                f"      CL={actual_result['CL']:.4f}, CD={actual_result['CD']:.5f}, "
+                                f"Volume={actual_result['Volume']:.4g}")
+                        elif actual_result:
+                            self.log_message.emit(f"      Error: {actual_result.get('error', '')}")
                     
                     # Build design variables dict
-                    design_variables_dict = {}
-                    for j, var_name in enumerate(['X1', 'X2', 'X3', 'X4']):
-                        design_variables_dict[var_name] = float(X_vals[j])
+                    design_variables_dict = {name: float(X_vals[j])
+                                             for j, name in enumerate(design_var_names)}
                     
-                    # Get actual result values (not pymoo F values which have penalties/negation)
-                    actual_result = None
-                    if hasattr(problem, 'last_eval_results') and i < len(problem.last_eval_results):
-                        actual_result = problem.last_eval_results[i]
-                    
-                    # Build objectives dict with ACTUAL values
+                    # Objectives with their actual values (not pymoo's F,
+                    # which is negated for maximization and penalized on failure)
                     objectives_dict = {}
-                    for j, obj in enumerate(objectives):
-                        obj_name = obj['name']
-                        if actual_result and actual_result.get('success', False):
-                            # Use actual computed values
-                            if obj_name == 'CD':
-                                objectives_dict[obj_name] = float(actual_result.get('CD', 0.0))
-                            elif obj_name == 'CL':
-                                objectives_dict[obj_name] = float(actual_result.get('CL', 0.0))
-                            elif obj_name == 'Volume':
-                                objectives_dict[obj_name] = float(actual_result.get('Volume', 0.0))
-                            elif obj_name in ['CL/CD', 'LD']:
-                                cd = actual_result.get('CD', 1.0)
-                                cl = actual_result.get('CL', 0.0)
-                                objectives_dict[obj_name] = float(cl / cd) if cd > 0 else 0.0
-                            elif obj_name == 'Cm':
-                                objectives_dict[obj_name] = float(actual_result.get('Cm', 0.0))
-                            else:
-                                # Fallback to F value
-                                objectives_dict[obj_name] = float(F_vals[j])
-                        else:
-                            # Failed design - use NaN
-                            objectives_dict[obj_name] = float('nan')
+                    for obj in objectives:
+                        objectives_dict[obj['name']] = (
+                            float(objective_value(actual_result, obj['name'])) if success
+                            else float('nan'))
                     
-                    # Build constraints dict
+                    # Constraints: the constrained quantity
                     constraints_dict = {}
-                    for j, const in enumerate(constraints):
+                    for const in constraints:
                         const_name = const['name']
-                        if actual_result and actual_result.get('success', False):
-                            # Use actual values for constraints
-                            if const_name == 'Volume_min':
-                                constraints_dict[const_name] = float(actual_result.get('Volume', 0.0))
-                            elif j < len(G_vals):
-                                constraints_dict[const_name] = float(G_vals[j])
-                        elif j < len(G_vals):
-                            constraints_dict[const_name] = float(G_vals[j])
-                    
-                    # Calculate CL from actual result
-                    CL = None
-                    CD = None
-                    LD = None
-                    if actual_result and actual_result.get('success', False):
-                        CL = actual_result.get('CL')
-                        CD = actual_result.get('CD')
-                        if CD and CD > 0:
-                            LD = CL / CD if CL else 0.0
+                        if not const.get('active', True) or const_name == 'design_space':
+                            continue
+                        key = {'CL_min': 'CL', 'CD_max': 'CD', 'Cm_max': 'Cm',
+                               'Volume_min': 'Volume'}.get(const_name)
+                        constraints_dict[const_name] = (
+                            float(actual_result[key]) if success and key else float('nan'))
                     
                     # Log to results manager
                     results.log_design(
@@ -259,7 +257,7 @@ class OptimizationWorker(QThread):
                         constraints=constraints_dict,
                         generation=gen,
                         success=success,
-                        eval_time=0.0  # We don't track individual eval times
+                        eval_time=float(actual_result.get('time', 0.0)) if actual_result else 0.0
                     )
                     
                     # Emit signal for real-time update
@@ -271,12 +269,12 @@ class OptimizationWorker(QThread):
                         **objectives_dict,
                         **constraints_dict
                     }
-                    if CL is not None:
-                        metrics['CL'] = CL
-                    if CD is not None:
-                        metrics['CD'] = CD
-                    if LD is not None:
-                        metrics['CL/CD'] = LD
+                    if success:
+                        metrics['CL'] = actual_result['CL']
+                        metrics['CD'] = actual_result['CD']
+                        metrics['Volume'] = actual_result['Volume']
+                        if actual_result['CD'] > 0:
+                            metrics['CL/CD'] = actual_result['CL'] / actual_result['CD']
                     
                     self.design_evaluated.emit(design_id, metrics)
                 
@@ -284,7 +282,7 @@ class OptimizationWorker(QThread):
                 gen_stats = {
                     'generation': gen,
                     'designs_evaluated': design_counter[0],
-                    'designs_in_gen': len(pop)
+                    'designs_in_gen': len(batch_X)
                 }
                 self.generation_complete.emit(gen, gen_stats)
                 self.log_message.emit(f"   Designs evaluated: {design_counter[0]} (✓{n_success} / ✗{n_failed})")
@@ -319,7 +317,7 @@ class OptimizationWorker(QThread):
             # Extract Pareto front from pymoo result
             self.log_message.emit("📊 Extracting Pareto front...")
             objective_names = [obj['name'] for obj in objectives]
-            minimize_flags = [obj['mode'] == 'Minimize' for obj in objectives]
+            minimize_flags = [obj['mode'].lower() == 'minimize' for obj in objectives]
             
             # Get Pareto-optimal designs from pymoo result
             pareto_designs = []
@@ -372,7 +370,25 @@ class OptimizationWorker(QThread):
                     self.log_message.emit(f"⚠ Pareto front plot failed: {e}")
             
             # Generate Pareto design files using pareto_df from CSV
-            if pareto_df is not None and len(pareto_df) > 0:
+            if method_case is not None and pareto_df is not None and len(pareto_df) > 0:
+                # STL, the tab's parameter dict (JSON) and a summary per design
+                from method_optimization import write_design_files
+                self.log_message.emit("")
+                self.log_message.emit("🔧 Writing Pareto design files...")
+                n_written = 0
+                for _, row in pareto_df.iterrows():
+                    design_id = int(row['Design_ID'])
+                    try:
+                        params = method_case.params([row[name] for name in design_var_names])
+                        info = {name: row[name] for name in objective_names if name in row}
+                        write_design_files(method_case, params, results.pareto_designs_dir,
+                                           f"design_{design_id:04d}", info)
+                        n_written += 1
+                    except Exception as e:
+                        self.log_message.emit(f"   ⚠ design {design_id}: {e}")
+                self.log_message.emit(f"✓ {n_written} Pareto designs written to "
+                                      f"{results.pareto_designs_dir}")
+            elif pareto_df is not None and len(pareto_df) > 0:
                 self.log_message.emit("")
                 self.log_message.emit("🔧 Generating CAD files for Pareto designs...")
                 
@@ -432,6 +448,11 @@ class OptimizationTab(QWidget):
         # Initialize state
         self.optimization_running = False
         self.optimization_worker = None
+        # Cases sent by the design tabs: title -> (OptimizationCase, tab or None)
+        self.method_cases = {}
+        self.last_results_folder = None
+        self.last_config = None
+        self.constraint_window = None
         
         self.init_ui()
         
@@ -461,7 +482,9 @@ class OptimizationTab(QWidget):
         # Left panel: Controls
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.addWidget(self.create_design_variables_group())
+        left_layout.addWidget(self.create_method_group())
+        self.design_vars_group = self.create_design_variables_group()
+        left_layout.addWidget(self.design_vars_group)
         left_layout.addWidget(self.create_objectives_group())
         left_layout.addWidget(self.create_constraints_group())
         left_layout.addWidget(self.create_simulation_params_group())
@@ -489,6 +512,207 @@ class OptimizationTab(QWidget):
         QTimer.singleShot(100, self.update_design_var_hints)
         QTimer.singleShot(100, self.update_time_estimate)
         
+    # ------------------------------------------------------------------
+    #  Design method: the OC Waverider (X1-X4) or a case sent by a tab
+    # ------------------------------------------------------------------
+
+    OC_METHOD_TEXT = "OC Waverider (X1–X4, settings from the OC Waverider tab)"
+
+    def create_method_group(self):
+        """Which design method to optimize: the OC waverider, or a design a
+        tab sent with "Send to Optimization" (see method_optimization)."""
+        group = QGroupBox("Design Method")
+        layout = QVBoxLayout()
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("<b>Method:</b>"))
+        self.method_combo = QComboBox()
+        self.method_combo.addItem(self.OC_METHOD_TEXT)
+        self.method_combo.setToolTip(
+            "OC Waverider: the classic X1–X4 optimization (CAD export and Gmsh mesh).\n"
+            "Other methods appear here when you click \"Send to Optimization\" in their tab.")
+        self.method_combo.currentIndexChanged.connect(self.on_method_changed)
+        row.addWidget(self.method_combo, 1)
+        layout.addLayout(row)
+
+        self.method_note = QLabel(
+            "<i>To optimize another method, click <b>Send to Optimization</b> in its tab.</i>")
+        self.method_note.setWordWrap(True)
+        self.method_note.setStyleSheet("color: #888888;")
+        layout.addWidget(self.method_note)
+
+        self.method_settings = QWidget()
+        ms = QVBoxLayout(self.method_settings)
+        ms.setContentsMargins(0, 0, 0, 0)
+        mach_row = QHBoxLayout()
+        mach_row.addWidget(QLabel("<b>Flight Mach number:</b>"))
+        self.flight_mach_spin = QDoubleSpinBox()
+        self.flight_mach_spin.setRange(1.1, 40.0)
+        self.flight_mach_spin.setDecimals(2)
+        self.flight_mach_spin.setSingleStep(0.5)
+        self.flight_mach_spin.setToolTip(
+            "Mach number of the PySAGAS analysis. Starts at the design Mach number;\n"
+            "the geometry keeps its own design Mach number.")
+        mach_row.addWidget(self.flight_mach_spin)
+        mach_row.addStretch()
+        ms.addLayout(mach_row)
+
+        self.var_table = QTableWidget(0, 5)
+        self.var_table.setHorizontalHeaderLabels(["Vary", "Variable", "Current", "Min", "Max"])
+        self.var_table.verticalHeader().setVisible(False)
+        self.var_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        for col in (0, 2, 3, 4):
+            self.var_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        self.var_table.setToolTip("Tick the parameters the optimizer may vary, within Min–Max.\n"
+                                  "Unticked parameters keep their current value.")
+        # As tall as its rows: the left panel scrolls, the table does not
+        self.var_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.var_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.var_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.var_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        ms.addWidget(self.var_table)
+
+        info = QLabel(
+            "<i>The tab's current design is the starting point. Each design is meshed "
+            "(closed, full span) and analysed with PySAGAS; A_ref is its planform area. "
+            "Results: the designs, the Pareto front and, per Pareto design, an STL and "
+            "its parameters.</i>")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #888888; font-size: 9px;")
+        ms.addWidget(info)
+
+        self.apply_best_btn = QPushButton("Apply best design to its tab")
+        self.apply_best_btn.setEnabled(False)
+        self.apply_best_btn.setToolTip(
+            "Load the best design of the last run (first objective, among the Pareto\n"
+            "designs) into the tab it came from and generate it.")
+        self.apply_best_btn.clicked.connect(self.apply_best_design)
+        ms.addWidget(self.apply_best_btn)
+        layout.addWidget(self.method_settings)
+        self.method_settings.setVisible(False)
+
+        group.setLayout(layout)
+        return group
+
+    def is_oc_method(self) -> bool:
+        return self.method_combo.currentIndex() <= 0
+
+    def set_method_case(self, case, tab=None):
+        """Make ``case`` (method_optimization.OptimizationCase) the method to
+        optimize; ``tab`` is where an optimized design is applied back."""
+        self.method_cases[case.title] = (case, tab)
+        index = self.method_combo.findText(case.title)
+        if index < 0:
+            self.method_combo.addItem(case.title)
+            index = self.method_combo.count() - 1
+        if self.method_combo.currentIndex() == index:
+            self.on_method_changed(index)
+        else:
+            self.method_combo.setCurrentIndex(index)
+        self.log_message(f"✓ {case.title}: design received ({len(case.variables)} parameters)")
+
+    def on_method_changed(self, index):
+        oc = self.is_oc_method()
+        self.design_vars_group.setVisible(oc)
+        self.method_settings.setVisible(not oc)
+        if hasattr(self, 'opt_match_shock_check'):
+            self.opt_match_shock_check.setVisible(oc)
+        if hasattr(self, 'opt_aref_spin'):
+            for w in (self.aref_label, self.opt_aref_spin, self.aref_unit, self.sync_aref_btn):
+                w.setVisible(oc)
+        if hasattr(self, 'mesh_quality_combo'):
+            self.mesh_quality_combo.setEnabled(oc)
+        if oc:
+            self.method_note.setText(
+                "<i>To optimize another method, click <b>Send to Optimization</b> in its tab.</i>")
+        else:
+            case, _ = self.method_cases[self.method_combo.currentText()]
+            note = f"Starting point: the current inputs of the <b>{case.title}</b> tab."
+            if case.notes:
+                note += f" {case.notes}"
+            self.method_note.setText(f"<i>{note}</i>")
+            self.flight_mach_spin.setValue(case.mach)
+            self._fill_variable_table(case)
+        if hasattr(self, 'time_estimate_label'):
+            self.update_time_estimate()
+
+    def _fill_variable_table(self, case):
+        t = self.var_table
+        t.setRowCount(len(case.variables))
+        self._var_widgets = []
+        for i, v in enumerate(case.variables):
+            use = QCheckBox()
+            use.setChecked(v.enabled)
+            t.setCellWidget(i, 0, use)
+            t.setItem(i, 1, QTableWidgetItem(v.label))
+            t.item(i, 1).setFlags(Qt.ItemIsEnabled)
+            t.setItem(i, 2, QTableWidgetItem(f"{v.value:.6g}"))
+            t.item(i, 2).setFlags(Qt.ItemIsEnabled)
+            spins = []
+            for col, val in ((3, v.lower), (4, v.upper)):
+                spin = QDoubleSpinBox()
+                spin.setRange(-1e6, 1e6)
+                spin.setDecimals(4)
+                spin.setSingleStep(max(abs(v.upper - v.lower) / 20.0, 1e-4))
+                spin.setValue(val)
+                t.setCellWidget(i, col, spin)
+                spins.append(spin)
+            self._var_widgets.append((use, spins[0], spins[1]))
+        t.resizeRowsToContents()
+        self._fit_var_table()
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, self._fit_var_table)          # again once styled and shown
+
+    def _fit_var_table(self):
+        # A minimum height is respected up through the splitter and the
+        # scroll area, where a fixed size policy alone was squeezed
+        self.var_table.setMinimumHeight(self.var_table.sizeHint().height())
+
+    def current_case(self):
+        """The selected case with the table's choices, or None for the OC method."""
+        if self.is_oc_method():
+            return None
+        from method_optimization import DesignVariable, OptimizationCase
+
+        case, _ = self.method_cases[self.method_combo.currentText()]
+        variables = [DesignVariable(v.name, v.label, v.value, lo.value(), hi.value(), use.isChecked())
+                     for v, (use, lo, hi) in zip(case.variables, self._var_widgets)]
+        return OptimizationCase(case.method, case.title, case.fixed, variables,
+                                self.flight_mach_spin.value(), case.notes)
+
+    def apply_best_design(self):
+        """Load the best design of the last run into the tab it came from."""
+        import pandas as pd
+
+        if not self.last_results_folder or not (self.last_config or {}).get('method_case'):
+            return
+        from method_optimization import OptimizationCase
+
+        case = OptimizationCase.from_dict(self.last_config['method_case'])    # the run's case
+        _, tab = self.method_cases.get(case.title, (None, None))
+        obj = (self.last_config or {}).get('objectives', [])
+        folder = Path(self.last_results_folder)
+        df = None
+        for csv in (folder / "pareto_front.csv", folder / "designs.csv"):
+            if csv.exists():
+                df = pd.read_csv(csv)
+                df = df[df['Success'] == True] if 'Success' in df else df
+                if len(df):
+                    break
+        if not obj or df is None or not len(df):
+            QMessageBox.warning(self, "Apply best design", "No successful design in the last run.")
+            return
+        name, mode = obj[0]['name'], obj[0]['mode'].lower()
+        row = df.loc[df[name].idxmax() if mode == 'maximize' else df[name].idxmin()]
+        names = [v['name'] for v in self.last_config['design_variables']]
+        params = case.params([row[n] for n in names])
+        if self.parent_gui is not None and hasattr(self.parent_gui, 'apply_optimized_design'):
+            self.parent_gui.apply_optimized_design(case.title, params, tab)
+        elif tab is not None:
+            tab.apply_optimized_params(params)
+        self.log_message(f"✓ Design {int(row['Design_ID'])} ({name} = {row[name]:.5g}) "
+                         f"applied to the {case.title} tab")
+
     def create_design_variables_group(self):
         """Create design variable range controls with automatic constraint enforcement"""
         group = QGroupBox("Design Variable Ranges")
@@ -909,7 +1133,9 @@ class OptimizationTab(QWidget):
         for i, (const_name, display_name, symbol, default_val, min_val, max_val) in enumerate(constraints, start=1):
             # Enable checkbox
             enable_check = QCheckBox()
-            enable_check.setChecked(const_name == 'CL_min')  # Default: only CL_min
+            # None by default: a waverider's CL is ~0.05-0.2, so a CL >= 1
+            # default made every design infeasible
+            enable_check.setChecked(False)
             layout.addWidget(enable_check, i, 0)
             
             # Constraint name
@@ -954,8 +1180,9 @@ class OptimizationTab(QWidget):
         layout.addWidget(QLabel("deg"), row, 2)
         row += 1
         
-        # Reference area
-        layout.addWidget(QLabel("<b>Reference Area A_ref:</b>"), row, 0)
+        # Reference area (the OC method; other methods use each design's planform area)
+        self.aref_label = QLabel("<b>Reference Area A_ref:</b>")
+        layout.addWidget(self.aref_label, row, 0)
         self.opt_aref_spin = QDoubleSpinBox()
         self.opt_aref_spin.setRange(0.1, 1000.0)
         self.opt_aref_spin.setValue(19.65)  # Default for baseline waverider
@@ -966,13 +1193,14 @@ class OptimizationTab(QWidget):
             "Tip: Use planform area from Aero Analysis tab."
         )
         layout.addWidget(self.opt_aref_spin, row, 1)
-        layout.addWidget(QLabel("m²"), row, 2)
+        self.aref_unit = QLabel("m²")
+        layout.addWidget(self.aref_unit, row, 2)
         
         # Sync button
-        sync_aref_btn = QPushButton("📋 Sync from Aero Tab")
-        sync_aref_btn.clicked.connect(self.sync_aref_from_aero)
-        sync_aref_btn.setToolTip("Copy reference area from Aero Analysis tab")
-        layout.addWidget(sync_aref_btn, row, 3)
+        self.sync_aref_btn = QPushButton("📋 Sync from Aero Tab")
+        self.sync_aref_btn.clicked.connect(self.sync_aref_from_aero)
+        self.sync_aref_btn.setToolTip("Copy reference area from Aero Analysis tab")
+        layout.addWidget(self.sync_aref_btn, row, 3)
         row += 1
         
         # Freestream pressure
@@ -1304,6 +1532,10 @@ class OptimizationTab(QWidget):
             time_per_design *= 2
         elif 'Fine' in mesh_quality:
             time_per_design *= 4
+        if hasattr(self, 'method_combo') and not self.is_oc_method():
+            # direct mesh + PySAGAS; LTOCs also solves every stream surface
+            case, _ = self.method_cases[self.method_combo.currentText()]
+            time_per_design = METHOD_SECONDS.get(case.method, 3)
             
         total_designs = pop_size * n_gen
         total_time_sec = (total_designs * time_per_design) / n_cores
@@ -1332,22 +1564,10 @@ class OptimizationTab(QWidget):
         if not self.validate_configuration():
             return
         
-        # Get parent GUI parameters if available
-        if hasattr(self.parent_gui, 'm_inf_spin'):
-            M_inf = self.parent_gui.m_inf_spin.value()
-            beta = self.parent_gui.beta_spin.value()
-            height = self.parent_gui.height_spin.value()
-            width = self.parent_gui.width_spin.value()
-        else:
-            # Default values
-            M_inf = 5.0
-            beta = 15.0
-            height = 1.34
-            width = 3.0
-            
         # Build configuration
-        config = self.build_configuration(M_inf, beta, height, width)
+        config = self.build_configuration(*self._oc_flight_and_size())
         self.last_config = config  # Store for use in callbacks
+        self.apply_best_btn.setEnabled(False)
         
         self.log_message("=" * 60)
         self.log_message("STARTING OPTIMIZATION")
@@ -1376,17 +1596,29 @@ class OptimizationTab(QWidget):
         # Start worker
         self.optimization_worker.start()
         
+    def _oc_flight_and_size(self):
+        """M_inf, beta, height, width of the OC Waverider tab (or defaults)."""
+        if hasattr(self.parent_gui, 'm_inf_spin'):
+            return (self.parent_gui.m_inf_spin.value(), self.parent_gui.beta_spin.value(),
+                    self.parent_gui.height_spin.value(), self.parent_gui.width_spin.value())
+        return 5.0, 15.0, 1.34, 3.0
+
     def build_configuration(self, M_inf, beta, height, width):
         """Build configuration dictionary from GUI settings"""
+        case = self.current_case()
         # Design variables
         design_variables = []
-        for var_name in ['X1', 'X2', 'X3', 'X4']:
-            spins = self.design_var_spins[var_name]
-            design_variables.append({
-                'name': var_name,
-                'min': spins['min'].value(),
-                'max': spins['max'].value()
-            })
+        if case is not None:
+            design_variables = [{'name': v.name, 'label': v.label, 'min': v.lower,
+                                 'max': v.upper} for v in case.active()]
+        else:
+            for var_name in ['X1', 'X2', 'X3', 'X4']:
+                spins = self.design_var_spins[var_name]
+                design_variables.append({
+                    'name': var_name,
+                    'min': spins['min'].value(),
+                    'max': spins['max'].value()
+                })
         
         # Objectives
         objectives = []
@@ -1437,12 +1669,15 @@ class OptimizationTab(QWidget):
         }
         
         # Fixed parameters (geometry + flow)
-        fixed_parameters = {
-            'M_inf': M_inf,
-            'beta': beta,
-            'height': height,
-            'width': width
-        }
+        if case is not None:
+            fixed_parameters = {'M_inf': case.mach}
+        else:
+            fixed_parameters = {
+                'M_inf': M_inf,
+                'beta': beta,
+                'height': height,
+                'width': width
+            }
         
         config = {
             'design_variables': design_variables,
@@ -1453,6 +1688,8 @@ class OptimizationTab(QWidget):
             'fixed_parameters': fixed_parameters,
             'timestamp': datetime.now().isoformat()
         }
+        if case is not None:
+            config['method_case'] = case.to_dict()
         
         return config
     
@@ -1471,7 +1708,10 @@ class OptimizationTab(QWidget):
         else:
             self.pareto_window = None
         
-        # Constraint plot window (Figure 11 style)
+        # Constraint plot window (Figure 11 style; the OC design space only)
+        if config.get('method_case'):
+            self.constraint_window = None
+            return
         width, height = self.get_geometry_params()
         self.constraint_window = ConstraintPlotWindow(config, width=width, height=height)
         self.constraint_window.show()
@@ -1549,6 +1789,9 @@ class OptimizationTab(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_label.setText("✅ Optimization Complete!")
         self.overall_progress.setValue(100)
+        self.last_results_folder = results_folder
+        is_method_case = bool((self.last_config or {}).get('method_case'))
+        self.apply_best_btn.setEnabled(is_method_case)
         
         # Update Pareto count from pareto_front.csv
         try:
@@ -1561,7 +1804,7 @@ class OptimizationTab(QWidget):
         except Exception as e:
             print(f"Could not read Pareto count: {e}")
         
-        # Generate constraint plot (similar to Figure 11 in paper)
+        # Generate constraint plot (similar to Figure 11 in paper; OC design space only)
         try:
             from optimization_utils import OptimizationResults
             
@@ -1577,7 +1820,7 @@ class OptimizationTab(QWidget):
                     minimize = controls['mode'].currentText().lower() == 'minimize'
                     break
             
-            if primary_objective:
+            if primary_objective and not is_method_case:
                 # Create results object to access plot function
                 results = OptimizationResults.__new__(OptimizationResults)
                 results.plots_dir = Path(results_folder) / "plots"
@@ -1657,7 +1900,21 @@ class OptimizationTab(QWidget):
                 return False
             
         # Check design variable ranges
-        for var_name, spins in self.design_var_spins.items():
+        case = self.current_case()
+        if case is not None:
+            if not case.active():
+                QMessageBox.warning(self, "Configuration Error",
+                                    "Tick at least one parameter to vary.")
+                return False
+            for v in case.active():
+                if v.lower >= v.upper:
+                    QMessageBox.warning(self, "Configuration Error",
+                                        f"{v.label}: Min value must be less than Max value!")
+                    return False
+                if not v.lower <= v.value <= v.upper:
+                    self.log_message(f"⚠ {v.label}: the current value {v.value:g} is outside "
+                                     f"{v.lower:g} to {v.upper:g}")
+        for var_name, spins in (self.design_var_spins.items() if case is None else ()):
             min_val = spins['min'].value()
             max_val = spins['max'].value()
             if min_val >= max_val:
@@ -1676,19 +1933,7 @@ class OptimizationTab(QWidget):
         )
         if filename:
             try:
-                # Get parent GUI parameters if available
-                if hasattr(self.parent_gui, 'm_inf_spin'):
-                    M_inf = self.parent_gui.m_inf_spin.value()
-                    beta = self.parent_gui.beta_spin.value()
-                    height = self.parent_gui.height_spin.value()
-                    width = self.parent_gui.width_spin.value()
-                else:
-                    M_inf = 5.0
-                    beta = 15.0
-                    height = 1.34
-                    width = 3.0
-                
-                config = self.build_configuration(M_inf, beta, height, width)
+                config = self.build_configuration(*self._oc_flight_and_size())
                 
                 with open(filename, 'w') as f:
                     json.dump(config, f, indent=2)
@@ -1711,6 +1956,17 @@ class OptimizationTab(QWidget):
                 with open(filename, 'r') as f:
                     config = json.load(f)
                 
+                # A design tab's case: restore it (applying back finds the tab by name)
+                if config.get('method_case'):
+                    from method_optimization import OptimizationCase
+                    case = OptimizationCase.from_dict(config['method_case'])
+                    tab = None
+                    if self.parent_gui is not None and hasattr(self.parent_gui, 'design_tab'):
+                        tab = self.parent_gui.design_tab(case.title)
+                    self.set_method_case(case, tab)
+                else:
+                    self.method_combo.setCurrentIndex(0)
+
                 # Load design variables
                 for var in config['design_variables']:
                     var_name = var['name']

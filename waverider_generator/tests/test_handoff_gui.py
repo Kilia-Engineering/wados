@@ -1,9 +1,13 @@
-"""Every design tab hands its geometry to the Aero Analysis tab.
+"""Every design tab hands its geometry to the Aero Analysis and Optimization tabs.
 
 For each tab of the hub: generate a design, *Send to Aero Analysis*, and
 check what arrives: a closed full-span mesh with outward normals in the
 analysis frame (x streamwise, y up, z span), A_ref equal to its planform
 area, and the tab listed in the Aero Analysis mesh dialog.
+
+*Send to Optimization* must open the tab's inputs as a case in the
+Optimization tab, an optimized design must load back into the tab, and a
+short run must go through the Optimization tab's worker.
 
 Run offscreen (``QT_QPA_PLATFORM=offscreen``); skipped where PyQt5 is not
 installed, as in CI.
@@ -63,7 +67,7 @@ def _mesh(path):
 
 
 def _generate(hub, attr):
-    import aero_handoff
+    import handoff
 
     tab = getattr(hub, attr)
     method, settings = TABS[attr]
@@ -71,10 +75,10 @@ def _generate(hub, attr):
         getattr(tab, spin).setValue(value)
     getattr(tab, method)()
     t0 = time.time()
-    while not aero_handoff.has_geometry(tab) and time.time() - t0 < 300:
+    while not handoff.has_geometry(tab) and time.time() - t0 < 300:
         hub._app.processEvents()
         time.sleep(0.05)
-    assert aero_handoff.has_geometry(tab), f"{attr}: no design after generate"
+    assert handoff.has_geometry(tab), f"{attr}: no design after generate"
     return tab
 
 
@@ -108,11 +112,11 @@ def test_oc_tab_sends_its_design(hub):
 
 
 def test_mesh_dialog_lists_every_design_tab(hub):
-    import aero_handoff
+    import handoff
     import waverider_gui as W
 
     for attr in TABS:
-        if not aero_handoff.has_geometry(getattr(hub, attr)):
+        if not handoff.has_geometry(getattr(hub, attr)):
             _generate(hub, attr)
     dlg = W.MeshSelectDialog(hub, hub.last_stl_file, hub.shadow_waverider_tab,
                              ltoc_tab=hub.ltoc_waverider_tab,
@@ -128,3 +132,88 @@ def test_mesh_dialog_lists_every_design_tab(hub):
     names["Cone-derived Waverider"].setChecked(True)                # earlier source keys kept
     dlg._on_accept()
     assert dlg.get_result()[1] == "shadow"
+
+
+# ---------------------------------------------------------------------------
+#  Optimization
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("attr", list(TABS))
+def test_tab_sends_its_design_to_optimization(hub, attr):
+    tab = getattr(hub, attr)
+    name = hub.tab_widget.tabText(hub.tab_widget.indexOf(tab))
+    hub.send_to_optimization(tab)
+    opt = hub.optimization_tab
+    assert hub.tab_widget.currentWidget() is hub._opt_hub_tab
+    assert opt.method_combo.currentText() == name and not opt.is_oc_method()
+    assert opt.design_vars_group.isHidden() and not opt.method_settings.isHidden()
+    case = tab.optimization_case()
+    assert opt.var_table.rowCount() == len(case.variables)
+    sent = opt.current_case()
+    assert sent.params() == case.params() and sent.mach == pytest.approx(case.mach)
+    assert [v.enabled for v in sent.variables] == [v.enabled for v in case.variables]
+
+
+@pytest.mark.parametrize("attr", list(TABS))
+def test_optimized_design_loads_back_into_its_tab(hub, attr):
+    """Each enabled variable moved to 3/4 of its range: the tab must take
+    the values (to its widgets' precision) and generate the design."""
+    import handoff
+
+    tab = getattr(hub, attr)
+    name = hub.tab_widget.tabText(hub.tab_widget.indexOf(tab))
+    method, settings = TABS[attr]
+    case = tab.optimization_case()
+    x = [v.lower + 0.75 * (v.upper - v.lower) for v in case.active()]
+    hub.apply_optimized_design(name, case.params(x))
+    t0 = time.time()
+    while time.time() - t0 < 300:                       # threaded generators finish here
+        hub._app.processEvents()
+        if handoff.has_geometry(tab) and not getattr(getattr(tab, "_worker", None), "isRunning", lambda: False)() \
+                and not getattr(getattr(tab, "_geom_worker", None), "isRunning", lambda: False)() \
+                and not getattr(getattr(tab, "worker", None), "isRunning", lambda: False)():
+            break
+        time.sleep(0.05)
+    assert hub.tab_widget.currentWidget() is tab and handoff.has_geometry(tab)
+    from method_optimization import get_param
+
+    now = tab.optimization_case().params()
+    for v, xv in zip(case.active(), x):
+        # widgets keep 2-3 decimals (some sliders truncate to 0.01)
+        assert get_param(now, v.name) == pytest.approx(xv, abs=0.01 * (v.upper - v.lower) + 0.011), v.name
+
+
+def test_short_optimization_run_and_apply(hub, tmp_path, monkeypatch):
+    """GVWD caret through the Optimization tab's worker: designs are logged,
+    the Pareto designs written, and the best one applied to the GVWD tab."""
+    pytest.importorskip("pymoo")
+    monkeypatch.chdir(tmp_path)                          # results/ goes here
+    tab = hub.gvwd_waverider_tab
+    tab.mode_combo.setCurrentIndex(2)                    # caret
+    hub.send_to_optimization(tab)
+    opt = hub.optimization_tab
+    opt.pop_size_spin.setValue(10)
+    opt.n_gen_spin.setValue(5)
+    opt.start_optimization()
+    t0 = time.time()
+    while opt.optimization_worker.isRunning() and time.time() - t0 < 600:
+        hub._app.processEvents()
+        time.sleep(0.05)
+    hub._app.processEvents()
+    log = opt.console.toPlainText()
+    assert "OPTIMIZATION COMPLETE" in log and "Starting design: CL/CD=" in log
+    folder = opt.last_results_folder
+    import pandas as pd
+
+    designs = pd.read_csv(os.path.join(folder, "designs.csv"))
+    assert len(designs) == 50 and designs["Success"].all()
+    assert list(designs.columns[3:5]) == ["theta_d_deg", "Lambda_deg"]
+    assert len(os.listdir(os.path.join(folder, "pareto_designs"))) >= 3   # stl, json, info
+    start = float(log.split("Starting design: CL/CD=")[1].split(",")[0])
+    assert designs["CL/CD"].max() > start
+    assert opt.apply_best_btn.isEnabled()
+    opt.apply_best_design()
+    best = designs.loc[designs["CL/CD"].idxmax()]
+    p = tab.optimization_case().params()
+    assert p["theta_d_deg"] == pytest.approx(best["theta_d_deg"], abs=0.01)
+    assert hub.tab_widget.currentWidget() is tab

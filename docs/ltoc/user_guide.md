@@ -89,6 +89,8 @@ The shock numbers are always stored. A preset whose numbers differ from the save
 
 *Send to Aero Analysis* loads the waverider into the **Aero Analysis** tab (closed full-span mesh, A_ref set to its planform area) for the preview, the PySAGAS analysis or the AeroDeck sweep. That tab's mesh dialog also offers *LTOCs Waverider* directly.
 
+*Send to Optimization* opens the current inputs in the **Optimization** tab (genetic algorithm with PySAGAS): the FCT height and the base ellipse size vary by default, and the upstream ellipse can be added. Each design solves every stream surface, so fewer stations make the optimization faster; designs with refused stations count as failed. *Apply best design to its tab* loads the result back. See `Optimization_Guide.md`.
+
 ---
 
 ## 2. Using the library

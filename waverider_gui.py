@@ -34,7 +34,7 @@ if GUI_ROOT not in sys.path:
 
 from waverider_generator.generator import waverider as wr
 from waverider_generator.cad_export import to_CAD
-import aero_handoff
+import handoff
 
 
 # Import plot windows for proper Qt-compatible plotting
@@ -523,7 +523,7 @@ class MeshSelectDialog(QDialog):
 
     Sources: the last imported or sent mesh, every design tab that has a
     design (``sources``: (name, tab) pairs; a tab provides
-    ``stl_for_analysis()``, see ``aero_handoff``), or an STL file.
+    ``stl_for_analysis()``, see ``handoff``), or an STL file.
     """
 
     def __init__(self, parent, last_stl_file, shadow_waverider_tab, title="Select Mesh",
@@ -570,8 +570,8 @@ class MeshSelectDialog(QDialog):
         self.radio_shadow = self.radio_ltoc = None
         any_checked = self._has_imported
         for i, (name, tab) in enumerate(sources):
-            if aero_handoff.has_geometry(tab):
-                radio = QRadioButton(f"{name}  \u2014  {aero_handoff.summary(tab)}")
+            if handoff.has_geometry(tab):
+                radio = QRadioButton(f"{name}  \u2014  {handoff.summary(tab)}")
                 if not any_checked:
                     radio.setChecked(True)
                     any_checked = True
@@ -632,7 +632,7 @@ class MeshSelectDialog(QDialog):
             name, tab = self._tab_sources[selected]
             try:
                 self._result_path = tab.stl_for_analysis()
-                self._result_source = aero_handoff.source_key(name)
+                self._result_source = handoff.source_key(name)
                 self.accept()
             except Exception as e:
                 QMessageBox.warning(
@@ -1730,7 +1730,7 @@ class WaveriderGUI(QMainWindow):
         self.last_stl_file = temp_stl
 
     # ------------------------------------------------------------------
-    #  Geometry from the design tabs (see aero_handoff)
+    #  Geometry from the design tabs (see handoff)
     # ------------------------------------------------------------------
 
     @property
@@ -1754,15 +1754,15 @@ class WaveriderGUI(QMainWindow):
     def send_to_aero_analysis(self, tab):
         """Load ``tab``'s design into the Aero Analysis tab and switch to it."""
         name = next((n for n, t in self._analysis_sources() if t is tab), "design tab")
-        if not aero_handoff.has_geometry(tab):
-            QMessageBox.warning(self, aero_handoff.SEND_TEXT,
+        if not handoff.has_geometry(tab):
+            QMessageBox.warning(self, handoff.SEND_TEXT,
                                 f"Generate a design in the {name} tab first.")
             return
         try:
             path = tab.stl_for_analysis()
             self._load_stl_for_analysis(path, name)
         except Exception as e:
-            QMessageBox.critical(self, aero_handoff.SEND_TEXT,
+            QMessageBox.critical(self, handoff.SEND_TEXT,
                                  f"Could not send the {name} design:\n\n{e}")
             return
         self.tab_widget.setCurrentWidget(self._aero_tab)
@@ -1789,6 +1789,52 @@ class WaveriderGUI(QMainWindow):
             self.mesh_info_label.setStyleSheet("color: #4ADE80;")
         except Exception as e:                   # the preview is optional
             print(f"[Aero] Preview of the sent mesh failed: {e}")
+
+    # ------------------------------------------------------------------
+    #  Design tabs -> Optimization tab (see handoff, method_optimization)
+    # ------------------------------------------------------------------
+
+    def design_tab(self, title):
+        """The design tab called ``title`` (e.g. "PSWR-1 Waverider"), or None."""
+        return next((t for n, t in self._analysis_sources() if n == title), None)
+
+    def _show_optimization(self):
+        self.tab_widget.setCurrentWidget(self._opt_hub_tab)
+        self._opt_sub_tabs.setCurrentIndex(0)                # Genetic Algorithm
+
+    def send_to_optimization(self, tab):
+        """Open ``tab``'s current inputs as a case in the Optimization tab."""
+        name = next((n for n, t in self._analysis_sources() if t is tab), "design tab")
+        if not hasattr(tab, "optimization_case"):
+            QMessageBox.information(self, handoff.OPT_TEXT,
+                                    f"The {name} tab cannot be optimized here yet.")
+            return
+        try:
+            case = tab.optimization_case()
+        except Exception as e:
+            QMessageBox.warning(self, handoff.OPT_TEXT, f"{name}: {e}")
+            return
+        case.title = name
+        self.optimization_tab.set_method_case(case, tab)
+        self._show_optimization()
+
+    def _send_oc_to_optimization(self):
+        """The OC Waverider is the Optimization tab's own method (X1-X4)."""
+        self.optimization_tab.method_combo.setCurrentIndex(0)
+        self._show_optimization()
+
+    def apply_optimized_design(self, title, params, tab=None):
+        """Load an optimized design into its tab and generate it there."""
+        tab = tab or self.design_tab(title)
+        if tab is None or not hasattr(tab, "apply_optimized_params"):
+            QMessageBox.warning(self, "Apply design", f"The {title} tab is not available.")
+            return
+        try:
+            tab.apply_optimized_params(params)
+        except Exception as e:
+            QMessageBox.warning(self, "Apply design", f"{title}: {e}")
+            return
+        self.tab_widget.setCurrentWidget(tab)
 
     def _send_oc_to_aero_analysis(self):
         if not hasattr(self, "_oc_analysis_source"):
@@ -2525,10 +2571,17 @@ class WaveriderGUI(QMainWindow):
         button_layout.addWidget(export_stl_btn, 1, 1)
 
         send_aero_btn = QPushButton("Send to Aero Analysis")
-        send_aero_btn.setToolTip(aero_handoff.SEND_TIP + "\nSharp geometry, as in Export STL.")
+        send_aero_btn.setToolTip(handoff.SEND_TIP + "\nSharp geometry, as in Export STL.")
         send_aero_btn.clicked.connect(self._send_oc_to_aero_analysis)
         send_aero_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
-        button_layout.addWidget(send_aero_btn, 2, 0, 1, 2)
+        button_layout.addWidget(send_aero_btn, 2, 0)
+
+        send_opt_btn = QPushButton("Send to Optimization")
+        send_opt_btn.setToolTip("Open the Optimization tab with the OC method (X1–X4);\n"
+                                "it uses this tab's Mach number, shock angle, width and height.")
+        send_opt_btn.clicked.connect(self._send_oc_to_optimization)
+        send_opt_btn.setStyleSheet("QPushButton { background-color: #78350F; color: #FFFFFF; font-weight: bold; padding: 10px; } QPushButton:hover { background-color: #F59E0B; color: #0A0A0A; }")
+        button_layout.addWidget(send_opt_btn, 2, 1)
         
         layout.addLayout(button_layout)
         
@@ -2797,6 +2850,7 @@ class WaveriderGUI(QMainWindow):
         layout = QVBoxLayout(tab)
 
         sub_tabs = QTabWidget()
+        self._opt_hub_tab, self._opt_sub_tabs = tab, sub_tabs
 
         # Genetic Algorithm Optimization
         self.optimization_tab = OptimizationTab(parent=self)

@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QFont
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -1112,7 +1112,8 @@ class PlanarWaveriderTab(QWidget):
             step_btn.setToolTip("CadQuery not available")
         layout.addWidget(step_btn, 0, 1)
 
-        layout.addWidget(aero_handoff.send_button(self), 1, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 1, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 2, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -1734,6 +1735,37 @@ class PlanarWaveriderTab(QWidget):
     def _on_step_error(self, msg):
         self.progress_label.setText("STEP export failed")
         QMessageBox.critical(self, "Error", msg)
+
+    _BLUNTING = {0: 'none', 1: 'inscribed', 2: 'bezier_g2', 3: 'tb_exterior'}
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the planform and shock parameters of the tab's own optimizer, with
+        its bounds; the width (the size) is left fixed by default."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+        from planar_waverider_optimizer import PlanarWaveriderOptimizer
+
+        p = self.get_params_dict()
+        p['blunting_method'] = self._BLUNTING.get(self.blunting_combo.currentIndex(), 'none')
+        B = PlanarWaveriderOptimizer.DEFAULT_BOUNDS
+        L = p['length']
+        variables = [
+            V('width', 'Width (m)', p['width'], B['width'][0] * L, B['width'][1] * L, enabled=False),
+            V('n', 'Power-law exponent n', p['n'], *B['n']),
+            V('beta', 'Shock angle beta (deg)', p['beta'], *B['beta_deg']),
+            V('epsilon', 'Epsilon', p['epsilon'], *B['epsilon']),
+            V('p1', 'p1', p['p1'], *B['p1']),
+            V('p2', 'p2', p['p2'], *B['p2']),
+            V('p3', 'p3', p['p3'], *B['p3']),
+        ]
+        return OptimizationCase('planar', 'Planar Waverider', p, variables, p['mach'])
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        inverse = {v: k for k, v in self._BLUNTING.items()}
+        self.blunting_combo.setCurrentIndex(inverse.get(params.get('blunting_method'), 0))
+        self.generate_waverider()
 
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab

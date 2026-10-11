@@ -60,7 +60,8 @@ class OptimizationResults:
             Custom name for this optimization run
             If None, uses timestamp
         """
-        self.base_dir = Path(base_dir)
+        # Absolute: PySAGAS changes the working directory while it runs
+        self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(exist_ok=True)
         
         # Create timestamped run directory
@@ -210,7 +211,7 @@ class OptimizationResults:
             return pd.DataFrame()
         
         # Extract objective values
-        objectives = df_success[objective_names].values
+        objectives = df_success[objective_names].to_numpy(dtype=float, copy=True)
         
         # Flip sign for maximization objectives
         for i, should_min in enumerate(minimize):

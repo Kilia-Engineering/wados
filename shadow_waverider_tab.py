@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QSplitter, QScrollArea)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1658,7 +1658,8 @@ class ShadowWaveriderTab(QWidget):
             "in the STEP file (can be hidden independently in CAD)")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
-        layout.addWidget(aero_handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 5, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -2641,6 +2642,28 @@ CG:             [{wr.cg[0]:.4f}, {wr.cg[1]:.4f}, {wr.cg[2]:.4f}]
 """)
     
     # === Export methods ===
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        shock angle and leading-edge polynomial coefficients may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around('shock_angle', 'Shock angle (deg)', p['shock_angle'], span=2.0, lower=5.0, upper=60.0),
+            V.around('a2', 'Coefficient A2', p['a2'], span=max(0.5, 0.5 * abs(p['a2'])), lower=-50.0, upper=50.0),
+            V.around('a0', 'Coefficient A0', p['a0'], span=0.05, lower=-1.0, upper=-1e-3),
+        ]
+        if str(p['order']).startswith('3'):
+            variables.append(V.around('a3', 'Coefficient A3', p['a3'],
+                                      span=max(1.0, 0.5 * abs(p['a3'])), lower=-100.0, upper=100.0))
+        notes = "Designs whose surfaces cross count as failed."
+        return OptimizationCase('shadow', 'Cone-derived Waverider', p, variables, p['mach'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate()
+
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab
         (metres, x streamwise, y up, z span). The surface grids are full span

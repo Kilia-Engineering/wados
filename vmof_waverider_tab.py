@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QStackedWidget, QComboBox)
 from PyQt5.QtCore import Qt
 
-import aero_handoff
+import handoff
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -613,7 +613,8 @@ class VMOFWaveriderTab(QWidget):
         layout.addWidget(tri_btn, 0, 1)
         layout.addWidget(step_btn, 1, 0, 1, 2)
         layout.addWidget(self.half_vehicle_check, 2, 0, 1, 2)
-        layout.addWidget(aero_handoff.send_button(self), 3, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 3, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 4, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -856,6 +857,26 @@ class VMOFWaveriderTab(QWidget):
     # ==============================================================
     #  Export
     # ==============================================================
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the OC shape X1-X4 and the shock angle may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        p['blunt_radius_mm'] = self.blunt_radius_spin.value()
+        variables = [V.around(k, k.upper(), p[k], span=0.15, lower=0.0, upper=1.0)
+                     for k in ('x1', 'x2', 'x3', 'x4')]
+        variables.append(V.around('beta', 'Shock angle (deg)', p['beta'], span=1.5, lower=5.0,
+                                  upper=45.0, enabled=False))
+        notes = ("X1-X4 outside the OC design space fail and are penalised. The flight "
+                 "Mach number starts at the maximum Mach number of the design range.")
+        return OptimizationCase('vmof', 'VMOF Waverider', p, variables, p['ma_max'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
 
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab

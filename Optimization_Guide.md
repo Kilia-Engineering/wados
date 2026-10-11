@@ -25,7 +25,7 @@ The GUI provides multiple optimization approaches, each suited to different desi
 | Method | Tab | Best For | Speed | Variables |
 |--------|-----|----------|-------|-----------|
 | **SHADOW Gradient-Based** | SHADOW Waverider → Optimization | Single-objective, fine-tuning | Fast (25-50 evals) | A2, A0 (or A3, A2, A0) |
-| **NSGA-II Genetic Algorithm** | Optimization | Multi-objective Pareto fronts | Slow (1000+ evals) | X1, X2, X3, X4 |
+| **NSGA-II Genetic Algorithm** | Optimization | Multi-objective Pareto fronts | Slow (1000+ evals); other methods 0.1–10 s per design | X1, X2, X3, X4, or any design tab's parameters (*Send to Optimization*) |
 | **Surrogate (Gaussian Process)** | Surrogate Opt | Multi-objective with few evals | Medium (50-200 evals) | X1, X2, X3, X4 |
 | **Neural Network Hunter** | Off-Design Surrogate | Quick design screening | Very fast (seconds) | X1-X4 + Mach/beta |
 | **Multi-Mach Hunter** | Multi-Mach Hunter | Robust multi-Mach performance | Very fast (seconds) | X1-X4 + Mach/beta |
@@ -97,7 +97,9 @@ Uses the NSGA-II genetic algorithm (via pymoo) to find a Pareto front of non-dom
 
 ### Design Variables
 
-The parametric waverider is defined by 4 normalized variables:
+For the OC Waverider (the default method) the parametric waverider is defined
+by 4 normalized variables. The Min/Max set in the tab are the search ranges.
+For the other design tabs see [Other design methods](#other-design-methods-send-to-optimization).
 
 | Variable | Meaning | Range |
 |----------|---------|-------|
@@ -133,6 +135,7 @@ Select one or more objectives. Each can be set to maximize or minimize:
 | **CL/CD** (Lift-to-drag ratio) | Maximize |
 | **Cm** (Pitching moment) | Minimize or target a value |
 | **Volume** | Maximize |
+| **Volumetric Efficiency** (V^(2/3) / planform area) | Maximize |
 
 ### Constraints
 
@@ -143,6 +146,9 @@ Select one or more objectives. Each can be set to maximize or minimize:
 | **CD_max** | Maximum drag coefficient |
 | **Cm_max** | Maximum pitching moment magnitude |
 | **Volume_min** | Minimum internal volume |
+
+None is enabled by default: a waverider's C_L is about 0.05–0.2, so a fixed
+C_L >= 1 default made every design infeasible.
 
 ### Algorithm Parameters
 
@@ -162,6 +168,41 @@ Select one or more objectives. Each can be set to maximize or minimize:
 - **Population size matters**: At least 10× the number of design variables (so >= 40 for 4 variables).
 - **Monitor the Pareto front**: Watch for the front spreading and stabilizing across generations.
 - **Export individual designs**: Select designs from the Pareto front table to export their CAD files.
+
+### Other design methods (Send to Optimization)
+
+Every design tab (Cone-derived, Planar, Hybrid, VMN, VMOF, VMPLO, MFOF, PSWR-1,
+GVWD, LTOCs) has a **Send to Optimization** button. It opens the tab's
+current inputs in the Optimization tab as a new entry of **Design Method**:
+
+- **Variables.** A table lists the parameters that may vary, with their current
+  value and a range around it. Tick the ones to vary and edit the ranges;
+  everything else keeps the tab's value.
+- **Evaluation.** Each design is built by the tab's own generator (no Qt,
+  `method_optimization.py`), meshed closed and full span, and analysed with
+  PySAGAS on that mesh directly, with no CAD export or Gmsh. A_ref is each
+  design's planform area. The flight Mach number starts at the design Mach number.
+- **Results.** The same `designs.csv`, `pareto_front.csv` and plots as for the
+  OC method. Each Pareto design gets an STL, its parameters as JSON and a summary
+  in `pareto_designs/`. **Apply best design to its tab** loads the best design
+  (first objective) back into the tab and generates it.
+
+| Tab | Varied by default | Can be added |
+|-----|-------------------|--------------|
+| Cone-derived | shock angle, A2, A0 (and A3 for 3rd order) | — |
+| Planar | n, beta, epsilon, p1–p3 (the tab's own optimizer bounds) | width |
+| Hybrid | X1–X4, OC share at root and tip | blend exponent, transition centre |
+| VMN | shock angle, S, A0 | Mach range |
+| VMOF | X1–X4 | shock angle |
+| VMPLO | exponent n and ICC height at centre and tip | Mach distribution, shock angle |
+| MFOF | shock angle, flat length L_s, y5, y6 | Mach distribution |
+| PSWR-1 | the three shock-angle knots, sweep | flat fraction |
+| GVWD | the mode's shape angles and body dimensions (fins left out) | — |
+| LTOCs | FCT height, base ellipse size | upstream ellipse size |
+
+A design whose geometry fails (outside a method's design space, a refused
+LTOCs station, an inverted surface) counts as failed and is penalised; the
+log shows why. Lower the tab's resolution (stations, planes) for faster runs.
 
 ---
 
@@ -292,6 +333,10 @@ results/optimization_20260223_143022/
     ├── convergence.png         # Objective convergence plot
     └── pareto_front.png        # Pareto front visualization
 ```
+
+For a design tab's case, `pareto_designs/` holds, per Pareto design,
+`design_NNNN.stl` (closed mesh, metres), `design_NNNN.json` (the tab's
+parameters) and `design_NNNN_info.txt`.
 
 ### Surrogate Optimizer
 

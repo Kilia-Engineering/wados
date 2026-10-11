@@ -14,7 +14,7 @@ import numpy as np
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAction, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
@@ -825,8 +825,10 @@ class Liu2019WaveriderTab(QWidget):
         self.export_btn.setMenu(menu)
         actions.addWidget(self.export_btn)
 
-        self.send_aero_btn = aero_handoff.send_button(self)
+        self.send_aero_btn = handoff.send_button(self)
         actions.addWidget(self.send_aero_btn)
+        self.send_opt_btn = handoff.optimize_button(self)
+        actions.addWidget(self.send_opt_btn)
         self._set_export_enabled(False)
 
         self.run_aero_btn = QPushButton("Run aero (Ma 6, 8, 10, 13)")

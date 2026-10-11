@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QTabWidget, QButtonGroup, QStackedWidget)
 from PyQt5.QtCore import Qt
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1078,7 +1078,8 @@ class HybridWaveriderTab(QWidget):
         self.shock_surface_check.setToolTip("Export conical shock as separate STEP body")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
-        layout.addWidget(aero_handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 5, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -1250,6 +1251,28 @@ class HybridWaveriderTab(QWidget):
     # ══════════════════════════════════════════════════════
     #  Export
     # ══════════════════════════════════════════════════════
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the OC shape X1-X4 and the blending at root and tip may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [V.around(k, k.upper(), p[k], span=0.15, lower=0.0, upper=1.0)
+                     for k in ('x1', 'x2', 'x3', 'x4')]
+        variables += [
+            V.around('alpha_root', 'OC share at the root', p['alpha_root'], span=0.25, lower=0.0, upper=1.0),
+            V.around('alpha_tip', 'OC share at the tip', p['alpha_tip'], span=0.25, lower=0.0, upper=1.0),
+            V.around('blend_exp', 'Blend exponent', p['blend_exp'], rel=0.5, lower=0.1, enabled=False),
+            V.around('x_t', 'Transition centre (x/L)', p['x_t'], span=0.15, lower=0.0, upper=1.0, enabled=False),
+        ]
+        notes = "X1-X4 outside the OC design space fail and are penalised."
+        return OptimizationCase('hybrid', 'Hybrid Waverider', p, variables, p['mach'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
 
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab

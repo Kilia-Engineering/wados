@@ -21,7 +21,7 @@ import sys
 import numpy as np
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 
-import aero_handoff
+import handoff
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
                              QDoubleSpinBox, QFileDialog, QGridLayout, QGroupBox,
@@ -419,7 +419,8 @@ class LTOCWaveriderTab(QWidget):
         self.btn_export_step.setToolTip("Faceted STEP solid via cadquery, millimetres,\n"
                                         "GUI frame (x streamwise, y up, z span).")
         self.btn_export_step.clicked.connect(self.export_step_dialog)
-        self.btn_send_aero = aero_handoff.send_button(self)
+        self.btn_send_aero = handoff.send_button(self)
+        self.btn_send_opt = handoff.optimize_button(self)
         for b in (self.btn_export_stl, self.btn_export_step, self.btn_send_aero):
             b.setEnabled(False)
         lay.addWidget(self.btn_export_stl, 2, 0)
@@ -430,6 +431,7 @@ class LTOCWaveriderTab(QWidget):
         help_btn.clicked.connect(self.show_help_dialog)
         lay.addWidget(help_btn, 3, 0)
         lay.addWidget(self.btn_send_aero, 3, 1)
+        lay.addWidget(self.btn_send_opt, 4, 1)
         g.setLayout(lay)
         return g
 
@@ -804,6 +806,37 @@ class LTOCWaveriderTab(QWidget):
                                  f"cadquery is required for STEP export.\n{e}")
         except Exception as e:
             QMessageBox.critical(self, "Export failed", f"{type(e).__name__}: {e}")
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        FCT height and, for an elliptic shock, the ellipse sizes may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        if p["source"] == "oc_import":
+            raise ValueError("an imported OC design is optimized in the OC Waverider tab")
+        variables = [V.around("fct_z", "FCT height Z", p["fct_z"], rel=0.3, lower=1e-4)]
+        if p["source"] != "bspline":
+            sh = p["shock"]
+            variables += [
+                V.around("shock.a_q", "Base ellipse half-width (Y)", sh["a_q"], rel=0.2, lower=1e-3),
+                V.around("shock.b_q", "Base ellipse half-height (Z)", sh["b_q"], rel=0.2, lower=1e-3),
+            ]
+            for key, label in (("a_p", "Upstream ellipse half-width (Y)"),
+                               ("b_p", "Upstream ellipse half-height (Z)")):
+                v = sh[key]
+                variables.append(V.around(f"shock.{key}", label, v, rel=0.3, lower=0.0)
+                                 if v > 0 else V(f"shock.{key}", label, 0.0, 0.0,
+                                                 0.5 * min(sh["a_q"], sh["b_q"]), enabled=False))
+        notes = (f"Each design solves {p['n_stations']} stream surfaces of {p['n_points']} points; "
+                 "fewer stations make the optimization faster. Designs with refused "
+                 "stations count as failed.")
+        return OptimizationCase("ltoc", "LTOCs Waverider", p, variables, p["M_inf"], notes)
+
+    def apply_optimized_params(self, params: dict) -> None:
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate()
 
     def analysis_summary(self) -> str:
         wr = self.waverider

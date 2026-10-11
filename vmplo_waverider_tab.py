@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QStackedWidget, QComboBox)
 from PyQt5.QtCore import Qt
 
-import aero_handoff
+import handoff
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -680,7 +680,8 @@ class VMPLOWaveriderTab(QWidget):
         layout.addWidget(iges_btn, 0, 2)
         layout.addWidget(tdm_btn, 0, 3)
         layout.addWidget(self.half_vehicle_check, 1, 0, 1, 4)
-        layout.addWidget(aero_handoff.send_button(self), 2, 0, 1, 4)
+        layout.addWidget(handoff.send_button(self), 2, 0, 1, 4)
+        layout.addWidget(handoff.optimize_button(self), 3, 0, 1, 4)
         group.setLayout(layout)
         return group
 
@@ -848,6 +849,29 @@ class VMPLOWaveriderTab(QWidget):
     # ==============================================================
     #  Export
     # ==============================================================
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the power-law exponents and the ICC heights may vary; the Mach
+        distribution and the shock angle can be added."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around('n_center', 'Exponent n at the centre', p['n_center'], span=0.1, lower=0.55, upper=1.0),
+            V.around('n_tip', 'Exponent n at the tip', p['n_tip'], span=0.1, lower=0.55, upper=1.0),
+            V.around('icc_center', 'ICC height at the centre (/H)', p['icc_center'], span=0.1, lower=0.0, upper=0.99),
+            V.around('icc_tip', 'ICC height at the tip (/H)', p['icc_tip'], span=0.1, lower=0.0, upper=0.99),
+            V.around('ma_center', 'Mach number at the centre', p['ma_center'], span=1.0, lower=1.5, upper=25.0, enabled=False),
+            V.around('ma_tip', 'Mach number at the tip', p['ma_tip'], span=1.0, lower=1.5, upper=25.0, enabled=False),
+            V.around('beta', 'Shock angle (deg)', p['beta'], span=1.5, lower=5.0, upper=45.0, enabled=False),
+        ]
+        return OptimizationCase('vmplo', 'VMPLO Waverider', p, variables, p['ma_center'])
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
 
     def stl_for_analysis(self):
         """Closed full-span mesh as a temporary STL for the Aero Analysis tab

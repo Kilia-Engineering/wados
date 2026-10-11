@@ -1,4 +1,6 @@
-"""Hand a design tab's geometry to the Aero Analysis tab.
+"""Hand a design tab's geometry to the Aero Analysis and Optimization tabs.
+
+**Aero Analysis.**
 
 Every design tab provides ``stl_for_analysis()``: its closed full-span mesh
 written to a temporary binary STL in metres, frame x streamwise, y up,
@@ -12,6 +14,12 @@ Two ways in:
   the mesh into the Aero Analysis tab and switches to it;
 * the mesh dialog of the Aero Analysis tab, which lists every tab that has
   a design.
+
+**Optimization.** A tab provides ``optimization_case()``: its current inputs
+as a ``method_optimization.OptimizationCase`` (the parameters that may vary,
+with bounds, and the rest fixed), and ``apply_optimized_params(params)`` to
+load an optimized design back. Its *Send to Optimization* button
+(``optimize_button``) opens the case in the Optimization tab.
 """
 from PyQt5.QtWidgets import QMessageBox, QPushButton
 
@@ -60,4 +68,29 @@ def send_button(tab, text: str = SEND_TEXT) -> QPushButton:
     btn = QPushButton(text)
     btn.setToolTip(SEND_TIP)
     btn.clicked.connect(lambda: send(tab))
+    return btn
+
+
+OPT_TEXT = "Send to Optimization"
+OPT_TIP = ("Optimize this design in the Optimization tab (genetic algorithm with\n"
+           "PySAGAS): the current inputs are the starting point; choose the\n"
+           "variables, their ranges, objectives and constraints there.")
+
+
+def send_to_optimization(tab):
+    """Open ``tab``'s design as a case in the Optimization tab of the main window."""
+    hub = tab.window()
+    if not hasattr(hub, "send_to_optimization"):
+        QMessageBox.information(
+            tab, OPT_TEXT,
+            "The Optimization tab is part of the WADOS main window "
+            "(python waverider_gui.py).")
+        return
+    hub.send_to_optimization(tab)
+
+
+def optimize_button(tab, text: str = OPT_TEXT) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setToolTip(OPT_TIP)
+    btn.clicked.connect(lambda: send_to_optimization(tab))
     return btn

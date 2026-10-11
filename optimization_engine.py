@@ -106,6 +106,9 @@ class WaveriderProblem(Problem):
                  # Geometry options
                  match_shockwave: bool = False,  # Match lower surface to shockwave for max volume
                  
+                 # Design variable ranges [(lo, hi)] * 4; default [0, 1] each
+                 bounds: Optional[List[Tuple[float, float]]] = None,
+                 
                  # Debug
                  verbose: bool = False):
         """
@@ -195,12 +198,14 @@ class WaveriderProblem(Problem):
         n_constr = len(perf_constraints)
         
         # Initialize pymoo Problem
+        if bounds is None:
+            bounds = [(0.0, 1.0)] * 4
         super().__init__(
             n_var=4,  # X1, X2, X3, X4
             n_obj=n_obj,
             n_constr=n_constr,
-            xl=np.array([0.0, 0.0, 0.0, 0.0]),  # Lower bounds
-            xu=np.array([1.0, 1.0, 1.0, 1.0])   # Upper bounds
+            xl=np.array([lo for lo, _ in bounds], dtype=float),  # Lower bounds
+            xu=np.array([hi for _, hi in bounds], dtype=float)   # Upper bounds
         )
         
         # Evaluation counter
@@ -381,8 +386,9 @@ class WaveriderProblem(Problem):
         # Track which designs succeeded and their errors (for logging purposes)
         self.last_eval_success = np.array([r['success'] for r in results])
         self.last_eval_errors = [r.get('error', '') if not r['success'] else '' for r in results]
-        # Store actual result values for callback to access
+        # Store actual result values (and the repaired designs) for the callback
         self.last_eval_results = results
+        self.last_eval_X = np.array(X, copy=True)
         
         # Count successes and collect error types
         n_success = sum(1 for r in results if r['success'])
