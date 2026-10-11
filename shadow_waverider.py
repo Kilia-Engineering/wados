@@ -830,68 +830,16 @@ class ShadowWaverider:
     
     def _estimate_volume(self) -> float:
         """
-        Calculate internal volume using cross-sectional area integration.
-        
-        Computes the area between upper and lower surfaces at each streamwise
-        station, then integrates along the streamwise direction.
-        
-        Returns
-        -------
-        volume : float
-            Internal volume in m³
+        Internal volume in m³: the volume enclosed by the closed surface mesh
+        built from the upper and lower surface grids (full span, one stream
+        per row), by the divergence theorem.
         """
-        n_span = self.upper_surface.shape[0]
-        n_stream = self.upper_surface.shape[1]
-        
-        if n_span == 0 or n_stream == 0:
+        from geometry_export import stream_volume
+
+        if self.upper_surface.shape[0] == 0 or self.upper_surface.shape[1] == 0:
             return 0.0
-        
-        areas = []
-        x_positions = []
-        
-        # Use centerline (middle span index) for X positions
-        # because X varies differently at each span station due to sweep
-        center_idx = n_span // 2
-        
-        # For each streamwise station, compute cross-sectional area
-        for j in range(n_stream):
-            # Get x position at centerline for this streamwise station
-            x_pos = self.upper_surface[center_idx, j, 0]
-            x_positions.append(x_pos)
-            
-            # Get Y and Z coordinates at this streamwise station
-            y_upper = self.upper_surface[:, j, 1]  # Shape: (n_span,)
-            z_upper = self.upper_surface[:, j, 2]
-            y_lower = self.lower_surface[:, j, 1]
-            z_lower = self.lower_surface[:, j, 2]
-            
-            # Compute height between surfaces at each spanwise position
-            height = np.abs(y_upper - y_lower)
-            
-            # Integrate across span using trapezoidal rule
-            # Need to sort by z for proper integration
-            sort_idx = np.argsort(z_upper)
-            z_sorted = z_upper[sort_idx]
-            height_sorted = height[sort_idx]
-            
-            try:
-                area = np.trapezoid(height_sorted, z_sorted)
-            except AttributeError:
-                area = np.trapezoid(height_sorted, z_sorted)
-            
-            areas.append(abs(area))
-        
-        if len(areas) < 2:
-            return 0.0
-        
-        # Integrate areas along streamwise direction
-        try:
-            volume = np.trapezoid(areas, x_positions)
-        except AttributeError:
-            volume = np.trapezoid(areas, x_positions)
-        
-        return abs(volume)
-    
+        return stream_volume(list(self.upper_surface), list(self.lower_surface))
+
     def _compute_mac(self) -> float:
         """
         Compute mean aerodynamic chord using thesis formula:

@@ -30,6 +30,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QProgressBar, QFileDialog,
                              QDialog, QTextEdit, QDialogButtonBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -673,6 +675,14 @@ class _EngFlatPage(QWidget):
             theta_upper_deg=self.theta_upper.value(),
         )
 
+    def set_config(self, c) -> None:
+        for w, v in ((self.M_design, c.M_design), (self.theta_fore, c.theta_fore_deg),
+                     (self.Lambda, c.Lambda_deg), (self.L_fore, c.L_fore),
+                     (self.L_center, c.L_center), (self.b_base, c.b_base),
+                     (self.h_base, c.h_base), (self.r_LE, c.r_LE_mm),
+                     (self.r_nose, c.r_nose_mm), (self.theta_upper, c.theta_upper_deg)):
+            w.setValue(v)
+
 
 class _EngShallowVPage(_EngFlatPage):
     """Shallow-V variant: same as flat-bottom plus dihedral_lower."""
@@ -705,6 +715,10 @@ class _EngShallowVPage(_EngFlatPage):
             dihedral_lower_deg=self.dihedral_lower.value(),
         )
 
+    def set_config(self, c) -> None:
+        super().set_config(c)
+        self.dihedral_lower.setValue(c.dihedral_lower_deg)
+
 
 class _CaretPage(QWidget):
     def __init__(self, parent=None):
@@ -730,6 +744,11 @@ class _CaretPage(QWidget):
         self.L.setToolTip("Streamwise body length (apex to base).")
         g.addWidget(QLabel("L:"), row, 0); g.addWidget(self.L, row, 1); row += 1
         gb.setLayout(g); layout.addWidget(gb); layout.addStretch()
+
+    def set_config(self, c) -> None:
+        for w, v in ((self.M_design, c.M_design), (self.theta_d, c.theta_d_deg),
+                     (self.Lambda, c.Lambda_deg), (self.L, c.L)):
+            w.setValue(v)
 
     def get_config(self) -> CaretConfig:
         return CaretConfig(
@@ -764,6 +783,11 @@ class _FlatDeltaPage(QWidget):
         self.L.setToolTip("Streamwise body length (apex to base).")
         g.addWidget(QLabel("L:"), row, 0); g.addWidget(self.L, row, 1); row += 1
         gb.setLayout(g); layout.addWidget(gb); layout.addStretch()
+
+    def set_config(self, c) -> None:
+        for w, v in ((self.M_design, c.M_design), (self.theta_d, c.theta_d_deg),
+                     (self.Lambda, c.Lambda_deg), (self.L, c.L)):
+            w.setValue(v)
 
     def get_config(self) -> FlatDeltaConfig:
         return FlatDeltaConfig(
@@ -809,6 +833,13 @@ class _MultiWedgePage(QWidget):
             "  delta       = triangular planform (waverider style).")
         g.addWidget(QLabel("extrusion:"), row, 0); g.addWidget(self.extrusion, row, 1); row += 1
         gb.setLayout(g); layout.addWidget(gb); layout.addStretch()
+
+    def set_config(self, c) -> None:
+        for w, v in ((self.M_design, c.M_design), (self.n, c.n),
+                     (self.delta_total, c.delta_total_deg), (self.L, c.L),
+                     (self.half_span, c.half_span), (self.height, c.height)):
+            w.setValue(v)
+        self.extrusion.setCurrentText(c.extrusion)
 
     def get_config(self) -> MultiWedgeConfig:
         return MultiWedgeConfig(
@@ -1287,6 +1318,8 @@ class GVWDWaveriderTab(QWidget):
             "(faceted BREP, millimetres, GUI frame: x streamwise, y up, z span).")
         self.btn_export_step.clicked.connect(self.export_step_dialog)
         layout.addWidget(self.btn_export_step, row, 1); row += 1
+        layout.addWidget(handoff.send_button(self), row, 0, 1, 2); row += 1
+        layout.addWidget(handoff.optimize_button(self), row, 0, 1, 2); row += 1
 
         help_btn = QPushButton("?")
         help_btn.setFixedWidth(32)
@@ -1590,7 +1623,7 @@ class GVWDWaveriderTab(QWidget):
             ev = eta_V(V, S)
             info["Volume"] = f"{V:.4f} m^3"
             info["Planform"] = f"{S:.4f} m^2"
-            info["eta_V"] = f"{ev:.4f}"
+            info["Volumetric Efficiency"] = f"{ev:.4f}"
         except Exception:
             pass
         # On-design aero (if available)
@@ -1642,9 +1675,9 @@ class GVWDWaveriderTab(QWidget):
                 S = planform_area_from_mesh(self.full_mesh)
                 ev = eta_V(V, S)
                 lines.append(f"GEOMETRY  ({self.full_mesh.n_faces} faces)")
-                lines.append(f"  V       = {V:.4f} m^3")
-                lines.append(f"  S_plan  = {S:.4f} m^2")
-                lines.append(f"  eta_V   = {ev:.4f}")
+                lines.append(f"  V                     = {V:.4f} m^3")
+                lines.append(f"  S_plan                = {S:.4f} m^2")
+                lines.append(f"  Volumetric Efficiency = {ev:.4f}")
             except Exception:
                 pass
             if geom_dt is not None:
@@ -1683,6 +1716,65 @@ class GVWDWaveriderTab(QWidget):
     # ------------------------------------------------------------------
     #  Export
     # ------------------------------------------------------------------
+
+    # Parameters an optimization may vary, per mode: (field, label, bounds)
+    _OPT_VARIABLES = {
+        "engineering_flat": [
+            ("theta_fore_deg", "Forebody angle theta_fore (deg)", dict(span=2.0, lower=0.5, upper=30.0)),
+            ("Lambda_deg", "Leading-edge sweep Lambda (deg)", dict(span=5.0, lower=40.0, upper=85.0)),
+            ("L_fore", "Forebody length (m)", dict(rel=0.25, lower=0.5)),
+            ("L_center", "Centre-body length (m)", dict(span=0.5, lower=0.0)),
+            ("b_base", "Base half-width (m)", dict(rel=0.25, lower=0.05)),
+            ("h_base", "Base height (m)", dict(rel=0.25, lower=0.05)),
+        ],
+        "caret": [
+            ("theta_d_deg", "Ramp angle theta_d (deg)", dict(span=3.0, lower=2.0, upper=30.0)),
+            ("Lambda_deg", "Leading-edge sweep Lambda (deg)", dict(span=5.0, lower=40.0, upper=85.0)),
+        ],
+        "multi_wedge": [
+            ("delta_total_deg", "Total deflection (deg)", dict(span=4.0, lower=1.0, upper=40.0)),
+            ("half_span", "Half span (m)", dict(rel=0.25, lower=0.05)),
+            ("height", "Height (m)", dict(rel=0.25, lower=0.05)),
+        ],
+    }
+    _OPT_VARIABLES["engineering_shallow_v"] = _OPT_VARIABLES["engineering_flat"] + [
+        ("dihedral_lower_deg", "Lower dihedral (deg)", dict(span=3.0, lower=0.0, upper=30.0))]
+    _OPT_VARIABLES["flat_delta"] = list(_OPT_VARIABLES["caret"])
+
+    def optimization_case(self):
+        """The current body as an optimization case (method_optimization):
+        the mode's shape angles and dimensions may vary; fins are left out."""
+        from dataclasses import asdict
+
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = asdict(self._current_geom_config())
+        variables = [V.around(name, label, float(p[name]), **bounds)
+                     for name, label, bounds in self._OPT_VARIABLES[p["mode"]]]
+        notes = "The body only; fins are not part of the optimization."
+        return OptimizationCase("gvwd", "GVWD Waverider", p, variables, float(p["M_design"]), notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized body (the geometry config as a dict) and generate it."""
+        from method_optimization import gvwd_config
+
+        cfg = gvwd_config(params)
+        self.mode_combo.setCurrentIndex([m for m, _ in _MODE_LABELS].index(cfg.mode))
+        self.param_stack.currentWidget().set_config(cfg)
+        self.generate_geometry()
+
+    def has_analysis_geometry(self) -> bool:
+        return self.full_mesh is not None
+
+    def analysis_summary(self) -> str:
+        return f"{self.current_mode}, {self.full_mesh.n_faces} faces"
+
+    def stl_for_analysis(self):
+        """The current mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import span_frame_to_gui, write_temp_stl
+
+        return write_temp_stl(span_frame_to_gui(self.full_mesh), prefix="gvwd_")
 
     def export_stl_dialog(self):
         if self.full_mesh is None:
@@ -1752,7 +1844,8 @@ class GVWDWaveriderTab(QWidget):
         "      in a background QThread; progress bar updates per cell.\n"
         "  Export STL/STEP : write the current geometry mesh to disk.\n\n"
         "READOUTS\n"
-        "  V, S_planform, eta_V : numerical volume + planform + ratio.\n"
+        "  V, S_planform         : numerical volume and planform area.\n"
+        "  Volumetric Efficiency : V^(2/3) / S_planform.\n"
         "  CL, CD_wave, CD_friction, CD_total, L/D : aero breakdown.\n"
         "  Cm                 : pitching moment about mid-chord.\n"
         "  q_LE max           : peak LE stagnation heat flux\n"

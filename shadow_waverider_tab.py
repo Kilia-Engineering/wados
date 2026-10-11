@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QProgressBar, QTextEdit, QTabWidget, QFileDialog,
                              QMessageBox, QSplitter, QScrollArea)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
+
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -51,6 +53,11 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 
+
+
+def _param_label(name):
+    """Axis label for a result column (data keys stay as they are)."""
+    return "Volumetric Efficiency" if name == "vol_efficiency" else name
 
 class DesignSpaceWorker(QThread):
     """Worker thread for design space exploration"""
@@ -454,20 +461,21 @@ class ShadowWaveriderCanvas(FigureCanvas):
 
         vol_eff = (wr.volume ** (2.0/3.0)) / wr.planform_area if wr.planform_area > 0 else 0.0
 
-        info = (
-            "WAVERIDER INFO\n"
-            f"  Method          Shadow (Cone-Derived)\n"
-            f"  Mach            {wr.mach:.1f}\n"
-            f"  Shock \u03b2         {wr.shock_angle:.1f}\u00b0\n"
-            f"  Cone \u03b8c         {wr.cone_angle_deg:.2f}\u00b0\n"
-            f"  Post-shock M    {wr.post_shock_mach:.2f}\n"
-            f"  Top Surface A   {wr.top_surface_control:.1f}\n"
-            f"  Length           {wr.length:.4f} m\n"
-            f"  Planform Area    {wr.planform_area:.4f} m\u00b2\n"
-            f"  Volume           {wr.volume:.6f} m\u00b3\n"
-            f"  Vol Efficiency   {vol_eff:.6f}\n"
-            f"  CG              [{wr.cg[0]:.4f}, {wr.cg[1]:.4f}, {wr.cg[2]:.4f}]"
-        )
+        rows = [
+            ("Method", "Shadow (Cone-Derived)"),
+            ("Mach", f"{wr.mach:.1f}"),
+            ("Shock \u03b2", f"{wr.shock_angle:.1f}\u00b0"),
+            ("Cone \u03b8c", f"{wr.cone_angle_deg:.2f}\u00b0"),
+            ("Post-shock M", f"{wr.post_shock_mach:.2f}"),
+            ("Top Surface A", f"{wr.top_surface_control:.1f}"),
+            ("Length", f"{wr.length:.4f} m"),
+            ("Planform Area", f"{wr.planform_area:.4f} m\u00b2"),
+            ("Volume", f"{wr.volume:.6f} m\u00b3"),
+            ("Volumetric Efficiency", f"{vol_eff:.6f}"),
+            ("CG", f"[{wr.cg[0]:.4f}, {wr.cg[1]:.4f}, {wr.cg[2]:.4f}]"),
+        ]
+        key_w = max(len(k) for k, _ in rows)
+        info = "WAVERIDER INFO\n" + "\n".join(f"  {k:<{key_w}}  {v}" for k, v in rows)
 
         self._info_text = self.fig.text(
             0.02, 0.98, info,
@@ -606,11 +614,11 @@ class DesignSpaceCanvas(FigureCanvas):
                     c='red', marker='x', s=50, alpha=0.5, label='Invalid')
 
         # Axis labels and styling
-        self.ax.set_xlabel(x_param, fontsize=12, color='#FFFFFF')
-        self.ax.set_ylabel(y_param, fontsize=12, color='#FFFFFF')
+        self.ax.set_xlabel(_param_label(x_param), fontsize=12, color='#FFFFFF')
+        self.ax.set_ylabel(_param_label(y_param), fontsize=12, color='#FFFFFF')
         if need_3d:
-            self.ax.set_zlabel(z_param, fontsize=12, color='#FFFFFF')
-            self.ax.set_title(f'{color_param} vs ({x_param}, {y_param}, {z_param})',
+            self.ax.set_zlabel(_param_label(z_param), fontsize=12, color='#FFFFFF')
+            self.ax.set_title(f'{_param_label(color_param)} vs ({_param_label(x_param)}, {_param_label(y_param)}, {_param_label(z_param)})',
                               fontsize=14, color='#FFFFFF')
             # Dark theme for 3D panes
             self.ax.xaxis.pane.fill = False
@@ -624,7 +632,7 @@ class DesignSpaceCanvas(FigureCanvas):
             self.ax.tick_params(axis='z', colors='#888888')
             self.ax.grid(True, alpha=0.2)
         else:
-            self.ax.set_title(f'{color_param} vs ({x_param}, {y_param})',
+            self.ax.set_title(f'{_param_label(color_param)} vs ({_param_label(x_param)}, {_param_label(y_param)})',
                               fontsize=14, color='#FFFFFF')
             self.ax.tick_params(colors='#888888')
             self.ax.grid(True, alpha=0.3)
@@ -723,7 +731,7 @@ class ShadowWaveriderTab(QWidget):
         'L/D':            ('L/D',            'CL/CD',          True),
         '-CD':            ('CD',             'CD',             False),
         'CL':             ('CL',             'CL',             True),
-        'Vol Efficiency': ('vol_efficiency', 'Vol Efficiency', True),
+        'Volumetric Efficiency': ('vol_efficiency', 'Volumetric Efficiency', True),
     }
 
     waverider_generated = pyqtSignal(object)
@@ -1650,6 +1658,8 @@ class ShadowWaveriderTab(QWidget):
             "in the STEP file (can be hidden independently in CAD)")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 5, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -1844,7 +1854,7 @@ class ShadowWaveriderTab(QWidget):
         # Objective
         gl.addWidget(QLabel("Objective:"), 0, 0)
         self.opt_objective = QComboBox()
-        self.opt_objective.addItems(["CL/CD", "-CD", "CL", "Vol Efficiency"])
+        self.opt_objective.addItems(["CL/CD", "-CD", "CL", "Volumetric Efficiency"])
         gl.addWidget(self.opt_objective, 0, 1)
 
         # Method
@@ -1982,7 +1992,7 @@ class ShadowWaveriderTab(QWidget):
         constr_group = QGroupBox("Optimization Constraints")
         cg = QGridLayout()
 
-        self.opt_vol_eff_min_check = QCheckBox("Vol Efficiency min:")
+        self.opt_vol_eff_min_check = QCheckBox("Volumetric Efficiency min:")
         self.opt_vol_eff_min_check.setToolTip("Constrain volumetric efficiency >= value")
         cg.addWidget(self.opt_vol_eff_min_check, 0, 0)
         self.opt_vol_eff_min_spin = QDoubleSpinBox()
@@ -1992,7 +2002,7 @@ class ShadowWaveriderTab(QWidget):
         cg.addWidget(self.opt_vol_eff_min_spin, 0, 1)
         self.opt_vol_eff_min_check.toggled.connect(self.opt_vol_eff_min_spin.setEnabled)
 
-        self.opt_vol_eff_max_check = QCheckBox("Vol Efficiency max:")
+        self.opt_vol_eff_max_check = QCheckBox("Volumetric Efficiency max:")
         self.opt_vol_eff_max_check.setToolTip("Constrain volumetric efficiency <= value")
         cg.addWidget(self.opt_vol_eff_max_check, 0, 2)
         self.opt_vol_eff_max_spin = QDoubleSpinBox()
@@ -2136,8 +2146,8 @@ class ShadowWaveriderTab(QWidget):
         self.opt_log.append(f"  x0 = {x0}")
         if vol_eff_min > 0 or vol_eff_max > 0 or cl_cd_min > 0 or volume_min > 0:
             constraints_str = []
-            if vol_eff_min > 0: constraints_str.append(f"vol_eff>={vol_eff_min:.3f}")
-            if vol_eff_max > 0: constraints_str.append(f"vol_eff<={vol_eff_max:.3f}")
+            if vol_eff_min > 0: constraints_str.append(f"Volumetric Efficiency>={vol_eff_min:.3f}")
+            if vol_eff_max > 0: constraints_str.append(f"Volumetric Efficiency<={vol_eff_max:.3f}")
             if cl_cd_min > 0: constraints_str.append(f"CL/CD>={cl_cd_min:.2f}")
             if volume_min > 0: constraints_str.append(f"vol>={volume_min:.4f}")
             self.opt_log.append(f"  Constraints: {', '.join(constraints_str)}")
@@ -2230,7 +2240,7 @@ class ShadowWaveriderTab(QWidget):
             self.opt_log.append(f"  CD = {final.get('CD', 'N/A')}")
             ve = final.get('vol_efficiency')
             if ve is not None:
-                self.opt_log.append(f"  Vol Eff = {ve:.4f}")
+                self.opt_log.append(f"  Volumetric Efficiency = {ve:.4f}")
             if 'Cm_alpha' in final:
                 self.opt_log.append(f"  Cm_alpha = {final.get('Cm_alpha', 'N/A')}")
                 self.opt_log.append(f"  Cn_beta  = {final.get('Cn_beta', 'N/A')}")
@@ -2378,8 +2388,8 @@ class ShadowWaveriderTab(QWidget):
             ax.plot(p_ld[sort_idx], p_ve[sort_idx], '--', color='#10B981', alpha=0.7)
 
         ax.set_xlabel('CL/CD', color='#FFFFFF')
-        ax.set_ylabel('Vol Efficiency', color='#FFFFFF')
-        ax.set_title('Pareto Front: CL/CD vs Vol Efficiency', color='#FFFFFF')
+        ax.set_ylabel('Volumetric Efficiency', color='#FFFFFF')
+        ax.set_title('Pareto Front: CL/CD vs Volumetric Efficiency', color='#FFFFFF')
         ax.tick_params(colors='#888888')
         ax.grid(True, alpha=0.3)
         ax.legend(facecolor='#1A1A1A', edgecolor='#333333', labelcolor='#CCCCCC')
@@ -2401,7 +2411,7 @@ class ShadowWaveriderTab(QWidget):
 
         # Build info text
         parts = [f"CL/CD={entry.get('L/D', 0):.3f}",
-                 f"Vol Eff={entry.get('vol_efficiency', 0):.4f}",
+                 f"Volumetric Efficiency={entry.get('vol_efficiency', 0):.4f}",
                  f"CL={entry.get('CL', 0):.4f}",
                  f"CD={entry.get('CD', 0):.6f}"]
         # Show design variables
@@ -2632,6 +2642,44 @@ CG:             [{wr.cg[0]:.4f}, {wr.cg[1]:.4f}, {wr.cg[2]:.4f}]
 """)
     
     # === Export methods ===
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        shock angle and leading-edge polynomial coefficients may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around('shock_angle', 'Shock angle (deg)', p['shock_angle'], span=2.0, lower=5.0, upper=60.0),
+            V.around('a2', 'Coefficient A2', p['a2'], span=max(0.5, 0.5 * abs(p['a2'])), lower=-50.0, upper=50.0),
+            V.around('a0', 'Coefficient A0', p['a0'], span=0.05, lower=-1.0, upper=-1e-3),
+        ]
+        if str(p['order']).startswith('3'):
+            variables.append(V.around('a3', 'Coefficient A3', p['a3'],
+                                      span=max(1.0, 0.5 * abs(p['a3'])), lower=-100.0, upper=100.0))
+        notes = "Designs whose surfaces cross count as failed."
+        return OptimizationCase('shadow', 'Cone-derived Waverider', p, variables, p['mach'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span). The surface grids are full span
+        already, one stream per row."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(list(np.asarray(wr.upper_surface)),
+                               list(np.asarray(wr.lower_surface)),
+                               kind="cone_derived_waverider")
+        return write_temp_stl(mesh, prefix="cone_derived_waverider_")
+
+    def analysis_summary(self):
+        wr = self.waverider
+        return f"M={wr.mach}, \u03b2={wr.shock_angle:.1f}\u00b0, L={wr.length:.2f}"
+
     def export_stl(self):
         if self.waverider is None:
             QMessageBox.warning(self, "Warning", "Generate waverider first!")

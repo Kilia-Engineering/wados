@@ -381,7 +381,7 @@ class ShadowOptimizer:
             obj = CD  # Minimize CD
         elif self.objective == 'CL':
             obj = -CL  # Maximize CL
-        elif self.objective == 'Vol Efficiency':
+        elif self.objective in ('Volumetric Efficiency', 'Vol Efficiency'):
             vol_eff = result.get('vol_efficiency', 0.0)
             obj = -vol_eff  # Maximize volumetric efficiency
         else:

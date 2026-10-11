@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QStackedWidget, QComboBox)
 from PyQt5.QtCore import Qt
 
+import handoff
+
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -118,31 +120,32 @@ class VMPLOCanvas3D(FigureCanvas):
 
     def _draw_info_panel(self, wr):
         lines = ['VMPLO WAVERIDER']
+        rows = []
         beta = getattr(wr, 'beta_deg', 0)
         length = getattr(wr, 'length', 0)
-        lines.append(f"  Beta           {beta:.1f} deg")
-        lines.append(f"  Length          {length:.4f} m")
+        rows.append(("Beta", f"{beta:.1f} deg"))
+        rows.append(("Length", f"{length:.4f} m"))
 
         # Mach range
         if hasattr(wr, '_mach_per_station'):
             ma = wr._mach_per_station
-            lines.append(f"  Ma range       {ma.min():.1f} - {ma.max():.1f}")
+            rows.append(("Ma range", f"{ma.min():.1f} - {ma.max():.1f}"))
 
         # Exponent range
         if hasattr(wr, '_n_per_station'):
             n = wr._n_per_station
-            lines.append(f"  n range        {n.min():.2f} - {n.max():.2f}")
+            rows.append(("n range", f"{n.min():.2f} - {n.max():.2f}"))
 
         # Cone angles
         if hasattr(wr, 'cone_angles_deg'):
             ca = wr.cone_angles_deg
-            lines.append(f"  Cone angles    {ca.min():.1f} - {ca.max():.1f} deg")
+            rows.append(("Cone angles", f"{ca.min():.1f} - {ca.max():.1f} deg"))
 
         # Volume
         vol = 0.0
         try:
             vol = wr.compute_volume()
-            lines.append(f"  Volume          {vol:.6f} m3")
+            rows.append(("Volume", f"{vol:.6f} m3"))
         except Exception:
             pass
 
@@ -160,14 +163,16 @@ class VMPLOCanvas3D(FigureCanvas):
             if len(chords) > 2:
                 a_half = float(np.trapezoid(chords, z_pos))
                 a_plan = 2.0 * a_half  # full vehicle (both halves)
-                lines.append(f"  Planform Area   {a_plan:.4f} m2")
+                rows.append(("Planform Area", f"{a_plan:.4f} m2"))
         except Exception:
             pass
 
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,
@@ -675,6 +680,8 @@ class VMPLOWaveriderTab(QWidget):
         layout.addWidget(iges_btn, 0, 2)
         layout.addWidget(tdm_btn, 0, 3)
         layout.addWidget(self.half_vehicle_check, 1, 0, 1, 4)
+        layout.addWidget(handoff.send_button(self), 2, 0, 1, 4)
+        layout.addWidget(handoff.optimize_button(self), 3, 0, 1, 4)
         group.setLayout(layout)
         return group
 
@@ -842,6 +849,39 @@ class VMPLOWaveriderTab(QWidget):
     # ==============================================================
     #  Export
     # ==============================================================
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the power-law exponents and the ICC heights may vary; the Mach
+        distribution and the shock angle can be added."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around('n_center', 'Exponent n at the centre', p['n_center'], span=0.1, lower=0.55, upper=1.0),
+            V.around('n_tip', 'Exponent n at the tip', p['n_tip'], span=0.1, lower=0.55, upper=1.0),
+            V.around('icc_center', 'ICC height at the centre (/H)', p['icc_center'], span=0.1, lower=0.0, upper=0.99),
+            V.around('icc_tip', 'ICC height at the tip (/H)', p['icc_tip'], span=0.1, lower=0.0, upper=0.99),
+            V.around('ma_center', 'Mach number at the centre', p['ma_center'], span=1.0, lower=1.5, upper=25.0, enabled=False),
+            V.around('ma_tip', 'Mach number at the tip', p['ma_tip'], span=1.0, lower=1.5, upper=25.0, enabled=False),
+            V.around('beta', 'Shock angle (deg)', p['beta'], span=1.5, lower=5.0, upper=45.0, enabled=False),
+        ]
+        return OptimizationCase('vmplo', 'VMPLO Waverider', p, variables, p['ma_center'])
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span; the half model mirrored)."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(wr.upper_surface_streams, wr.lower_surface_streams,
+                               full_span=True, kind="vmplo_waverider")
+        return write_temp_stl(mesh, prefix="vmplo_waverider_")
 
     def export_stl(self):
         if self.waverider is None:

@@ -12,15 +12,38 @@ In WADOS it is the **LTOCs Waverider** tab (`ltoc_waverider_tab.py`) and the `lt
 
 | Input | Meaning |
 |---|---|
-| Shock surface | One of three kinds:<br>• **R1 presets**: waverider cases I and II (R1 Eqs. 23, 25), test case II (Eq. 18), and a circular cone.<br>• **Custom elliptic ruled shock** S(m, n) = (1 − n) p(m) + n q(m), with p = (x_p, a_p cos m, b_p sin m) and q = (x_q, a_q cos m, b_q sin m) (R1 Eqs. 12, 15).<br>• **Import the current OC design** from the OC Waverider tab. |
-| Frame | R1's: X freestream, Y span, **Z down**. The base plane is X = x_q. |
+| Shock surface | One of four kinds:<br>• **Presets:** the shocks published by Zheng et al. (2020): *Elliptic cone shock, Mach 6 (published case I)*, *Shape-changing elliptic shock, Mach 7 (published case II)* and *(published test shock)*. Also *Circular cone shock 12°, Mach 6*. The text under the list describes each one and gives its published lift and drag.<br>• **Custom elliptic shock (two ellipses):** straight lines join matching points of an upstream ellipse and a base ellipse. You set each ellipse's X position, half-width (Y) and half-height (Z); the base ellipse's X is the base plane (R1 Eqs. 12, 15).<br>• **Shock from a data file (CSV):** any shock given as points; see §1.1.<br>• **Import the current OC design** from the OC Waverider tab. |
+| Coordinates | X downstream, Y across the span (symmetry plane Y = 0), **Z downward**: the body hangs below the FCT. Exports and the 3-D view use the WADOS frame (x downstream, y up, z span). |
 | Mach number | Design Mach number (γ = 1.4). |
-| FCT Z | The flow capture tube is the line Z = const in the base plane (R1 Eqs. 24, 26). It must lie between 0 and b_q. The leading edge is the FCT projected upstream onto the shock. |
+| FCT height Z | The flow capture tube (FCT) is the straight line Z = const in the base plane that outlines the top of the waverider (R1 Eqs. 24, 26). The leading edge is the FCT projected upstream onto the shock. It must cross the shock trace in the base plane. |
 | FCT stations | Stream surfaces across the half span. 25 (default) reproduces R1 Tables 2 and 3 to 0.4 %. |
 | Station spacing | Clustered at the symmetry plane (default) or uniform. Clustering matters when the FCT meets the shock near its apex (R1 case I). |
 | Points per stream surface | Shock points between the leading edge and the base. 40 (default) converges the forces to < 0.03 %; the cost grows with its square. |
 
 Editing a preset's numbers turns it into a custom shock. With the OC import, the shock, Mach number and leading edge come from the OC design, and LTOCs reproduces that design (validation V5).
+
+### 1.1 Shock data files
+
+*Shock from a data file (CSV)* reads shock points on a structured grid and joins them into a smooth surface (an interpolating bicubic spline, `BSplineShock`). *Save shock as CSV...* writes the current shock in this format, so a preset makes a good starting template.
+
+```
+# LTOCs shock surface data (WADOS)
+# x_base = 1.5        optional: fills "Base plane X"
+# M_inf = 7           optional: fills "Mach number"
+# fct_z = 0.25        optional: fills "FCT height Z"
+u,v,X,Y,Z
+0.0,0.0,0.1,0.3,0.0
+0.0,0.0625,0.1875,0.3219,0.0
+...
+```
+
+- **Grid.** One row per point of a full u × v grid, at least 4 × 4. u runs across the span and v downstream; their values only label the grid (any increasing numbers).
+- **Columns.** The header names the columns in any order. Without a header the order is u, v, X, Y, Z. Lines starting with `#` are comments.
+- **Coordinates** as above: X downstream, Y across the span, Z downward.
+- **Base plane.** Set *Base plane X* inside the data. The points must continue **past** the base plane: the body at the base depends on the shock downstream of it, typically 0.5 to 1.5 local chords. Data are never extrapolated; a station whose shock data end too early is refused as `undetermined`.
+- **Errors** name the line and the problem (a missing column, a non-number, an incomplete grid).
+
+Shock data are embedded in project files, so a project does not depend on the CSV file. R1 case II through a 61 × 41 data file reproduces the analytic result to better than 0.01 % in C_L and C_D.
 
 **Run.** *Generate LTOCs Waverider* solves one stream surface per station in a background thread, with a progress bar; *Cancel* stops it. A typical design takes 5–20 s.
 
@@ -31,7 +54,7 @@ Editing a preset's numbers turns it into a custom shock. With the OC import, the
   - length, half span, height;
   - **C_L, C_D, L/D** with the planform reference area, plus the wetted-area values (see §3);
   - spanwise smoothness.
-- **3-D view:** the lower surface coloured by p/p∞, the upper (freestream) surface, the shock curves from the leading edge, and the leading edge.
+- **3-D view:** the lower surface coloured by p/p∞, the upper (freestream) surface, the shock curves from the leading edge, and the leading edge. An information panel (as in the GVWD and PSWR-1 tabs) lists Mach number, length, span, height, volume, planform area, volumetric efficiency (V^(2/3) / planform area), C_L, C_D, L/D and the resolution.
 - **Front view:** the shock trace in the base plane, the FCT, lower-surface cross-sections and the x-projected shock curves. The curves turn in azimuth, which is the "local turning".
 - **Wall pressure:** p/p∞ on streamwise planes (z = const) and crosswise planes (x = const), laid out like R1 Figs. 23 and 27.
 - **Diagnostics** per station:
@@ -59,12 +82,14 @@ Editing a preset's numbers turns it into a custom shock. With the OC import, the
 Both use the GUI frame (x streamwise, y up, z span).
 
 **Project files.** *File → Save/Load Parameters* and the session restored at start-up (`last_session.json`) include the tab's inputs, in the section `ltoc_waverider`:
-- the shock source (preset name, `custom` or `oc_import`) and the six shock numbers;
+- the shock source (preset name, `custom`, `bspline` or `oc_import`) and the six shock numbers; for a data file, the points themselves and the base plane X;
 - Mach number, FCT Z, stations, spacing and points.
 
-The shock numbers are always stored. A preset that was renamed, or whose numbers differ from the saved ones, therefore loads as a custom shock with the saved numbers. For the OC import, the OC design is stored in the project's own `oc_waverider` section: after loading, generate it in the OC Waverider tab first. A loaded design is not solved automatically; click *Generate*.
+The shock numbers are always stored. A preset whose numbers differ from the saved ones loads as a custom shock with the saved numbers; projects saved with the earlier preset names ("R1 waverider case I (Eq. 23), M 6" and so on) still select the renamed presets. For the OC import, the OC design is stored in the project's own `oc_waverider` section: after loading, generate it in the OC Waverider tab first. A loaded design is not solved automatically; click *Generate*.
 
-The **Aero Analysis** tab can load the waverider directly: choose *LTOCs Waverider* in its mesh dialog for the preview, the PySAGAS analysis or the AeroDeck sweep.
+*Send to Aero Analysis* loads the waverider into the **Aero Analysis** tab (closed full-span mesh, A_ref set to its planform area) for the preview, the PySAGAS analysis or the AeroDeck sweep. That tab's mesh dialog also offers *LTOCs Waverider* directly.
+
+*Send to Optimization* opens the current inputs in the **Optimization** tab (genetic algorithm with PySAGAS): the FCT height and the base ellipse size vary by default, and the upstream ellipse can be added. Each design solves every stream surface, so fewer stations make the optimization faster; designs with refused stations count as failed. *Apply best design to its tab* loads the result back. See `Optimization_Guide.md`.
 
 ---
 
@@ -74,7 +99,7 @@ The **Aero Analysis** tab can load the waverider directly: choose *LTOCs Waverid
 from ltoc.design import LTOCDesign, EllipticShock
 
 # R1 waverider case II (R1 Eqs. 25-26)
-design = LTOCDesign(shock=EllipticShock(0.1, 0.3, 0.2, 1.5, 0.65, 0.8),
+design = LTOCDesign(shock=EllipticShock(0.1, 0.3, 0.2, 1.5, 0.65, 0.8),   # x, half-width, half-height of the upstream and base ellipses
                     M_inf=7.0, fct_z=0.25, n_stations=25, n_points=40)
 res = design.build()
 print(res.summary())               # CL 0.2029, CD 0.0645, L/D 3.143 (R1: 0.2034, 0.0648, 3.1395)

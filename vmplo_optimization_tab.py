@@ -46,7 +46,7 @@ class ParetoCanvas(FigureCanvas):
         self.fig.patch.set_facecolor('#1A1A1A')
         self.ax = self.fig.add_subplot(111)
         _style_ax(self.ax, "Evaluated Designs")
-        self.ax.set_xlabel("Volumetric Efficiency η")
+        self.ax.set_xlabel("Volumetric Efficiency")
         self.ax.set_ylabel("Objective J")
         super().__init__(self.fig)
         self.setParent(parent)
@@ -66,7 +66,7 @@ class ParetoCanvas(FigureCanvas):
     def _redraw(self):
         self.ax.clear()
         _style_ax(self.ax, "Evaluated Designs")
-        self.ax.set_xlabel("Volumetric Efficiency η")
+        self.ax.set_xlabel("Volumetric Efficiency")
         self.ax.set_ylabel("Objective J")
         if self._etas:
             colors = np.linspace(0.3, 1.0, len(self._etas))
@@ -414,11 +414,11 @@ class VMPLOOptimizationWorker(QThread):
                     best_result[0] = result.copy()
                     self.new_best.emit(result)
                     self.log_message.emit(
-                        f"  [{eval_count[0]}] ★ NEW BEST η={eta:.5f} "
+                        f"  [{eval_count[0]}] ★ NEW BEST Volumetric Efficiency={eta:.5f} "
                         f"V={vol:.4f}m³ A={a_plan:.4f}m²")
                 elif eval_count[0] % 20 == 0:
                     self.log_message.emit(
-                        f"  [{eval_count[0]}] η={eta:.5f} V={vol:.4f}")
+                        f"  [{eval_count[0]}] Volumetric Efficiency={eta:.5f} V={vol:.4f}")
 
                 return J
 
@@ -538,7 +538,7 @@ class VMPLOOptimizationTab(QWidget):
         layout = QGridLayout()
         row = 0
 
-        layout.addWidget(QLabel("α (η weight):"), row, 0)
+        layout.addWidget(QLabel("α (Volumetric Efficiency weight):"), row, 0)
         self.alpha_spin = QDoubleSpinBox()
         self.alpha_spin.setRange(0.0, 1.0)
         self.alpha_spin.setValue(1.0)
@@ -907,7 +907,7 @@ class VMPLOOptimizationTab(QWidget):
         self._best_result = result
         self.pareto_canvas.add_point(result['eta'], result['J'], is_best=True)
         self.status_label.setText(
-            f"Best: η={result['eta']:.5f}  V={result['volume']:.4f}m³")
+            f"Best: Volumetric Efficiency={result['eta']:.5f}  V={result['volume']:.4f}m³")
         # Update distribution plot
         half_span = self.opt_width.value()
         ma_cp = result.get('ma_cp', [self.opt_mach.value()] * 5)
@@ -926,7 +926,7 @@ class VMPLOOptimizationTab(QWidget):
             best = summary.get('best')
             if best:
                 self.status_label.setText(
-                    f"Done: η={best['eta']:.5f} ({summary['total_evals']} evals)")
+                    f"Done: Volumetric Efficiency={best['eta']:.5f} ({summary['total_evals']} evals)")
             else:
                 self.status_label.setText("Done (no feasible design found)")
 

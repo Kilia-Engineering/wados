@@ -106,6 +106,9 @@ class WaveriderProblem(Problem):
                  # Geometry options
                  match_shockwave: bool = False,  # Match lower surface to shockwave for max volume
                  
+                 # Design variable ranges [(lo, hi)] * 4; default [0, 1] each
+                 bounds: Optional[List[Tuple[float, float]]] = None,
+                 
                  # Debug
                  verbose: bool = False):
         """
@@ -195,12 +198,14 @@ class WaveriderProblem(Problem):
         n_constr = len(perf_constraints)
         
         # Initialize pymoo Problem
+        if bounds is None:
+            bounds = [(0.0, 1.0)] * 4
         super().__init__(
             n_var=4,  # X1, X2, X3, X4
             n_obj=n_obj,
             n_constr=n_constr,
-            xl=np.array([0.0, 0.0, 0.0, 0.0]),  # Lower bounds
-            xu=np.array([1.0, 1.0, 1.0, 1.0])   # Upper bounds
+            xl=np.array([lo for lo, _ in bounds], dtype=float),  # Lower bounds
+            xu=np.array([hi for _, hi in bounds], dtype=float)   # Upper bounds
         )
         
         # Evaluation counter
@@ -381,8 +386,9 @@ class WaveriderProblem(Problem):
         # Track which designs succeeded and their errors (for logging purposes)
         self.last_eval_success = np.array([r['success'] for r in results])
         self.last_eval_errors = [r.get('error', '') if not r['success'] else '' for r in results]
-        # Store actual result values for callback to access
+        # Store actual result values (and the repaired designs) for the callback
         self.last_eval_results = results
+        self.last_eval_X = np.array(X, copy=True)
         
         # Count successes and collect error types
         n_success = sum(1 for r in results if r['success'])
@@ -726,86 +732,17 @@ def evaluate_single_design(
 
 def calculate_volume(wr: WaveriderGenerator) -> float:
     """
-    Calculate internal volume of waverider.
-    
-    Uses trapezoidal rule integration over cross-sections.
-    
-    Parameters
-    ----------
-    wr : WaveriderGenerator
-        Waverider geometry object
-        
-    Returns
-    -------
-    volume : float
-        Internal volume in m³
-        
-    Notes
-    -----
-    The waverider is symmetric, so we calculate the full volume by:
-    1. Taking cross-sections along the streamwise direction
-    2. Computing the area of each cross-section using shoelace formula
-    3. Integrating areas using trapezoidal rule
+    Internal volume of the waverider (full vehicle), in m³.
+
+    Volume enclosed by the closed full-span surface mesh built from the
+    upper and lower streams (divergence theorem), exact for the
+    triangulated surface.
     """
-    # Get streamlines
-    upper_streams = wr.upper_surface_streams
-    lower_streams = wr.lower_surface_streams
-    
-    if len(upper_streams) == 0 or len(lower_streams) == 0:
-        return 0.0
-    
-    n_streamwise = upper_streams[0].shape[0]  # Number of points along each stream
-    
-    # Calculate area of each cross-section at different x-locations
-    areas = []
-    x_positions = []
-    
-    for i in range(n_streamwise):
-        # Collect all points at this streamwise index
-        y_upper = []
-        z_upper = []
-        y_lower = []
-        z_lower = []
-        
-        for stream in upper_streams:
-            if i < stream.shape[0]:  # Safety check
-                y_upper.append(stream[i, 1])
-                z_upper.append(stream[i, 2])
-        
-        for stream in lower_streams:
-            if i < stream.shape[0]:  # Safety check
-                y_lower.append(stream[i, 1])
-                z_lower.append(stream[i, 2])
-        
-        if len(y_upper) == 0 or len(y_lower) == 0:
-            continue
-        
-        # x position (should be same for all streams at this index)
-        x_pos = upper_streams[0][i, 0]
-        x_positions.append(x_pos)
-        
-        # Create closed polygon: lower surface + upper surface (reversed)
-        z_points = np.concatenate([z_lower, z_upper[::-1]])
-        y_points = np.concatenate([y_lower, y_upper[::-1]])
-        
-        # Shoelace formula for polygon area
-        area = 0.5 * abs(np.dot(z_points, np.roll(y_points, 1)) - 
-                         np.dot(y_points, np.roll(z_points, 1)))
-        
-        areas.append(area)
-    
-    if len(areas) < 2:
-        return 0.0
-    
-    # Integrate using trapezoidal rule (gives half-volume due to symmetry)
-    try:
-        half_volume = np.trapezoid(areas, x_positions)
-    except AttributeError:
-        half_volume = np.trapezoid(areas, x_positions)
+    from geometry_export import stream_volume
 
-    # Full volume (symmetric waverider - multiply by 2)
-    return 2.0 * abs(half_volume)
-
+    if len(wr.upper_surface_streams) == 0:
+        return 0.0
+    return stream_volume(wr.upper_surface_streams, wr.lower_surface_streams, full_span=True)
 
 def generate_mesh(step_file: str, stl_file: str, mesh_size: float):
     """

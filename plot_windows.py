@@ -14,6 +14,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+# Display names for objective keys whose internal name is an abbreviation
+_OBJ_LABELS = {"VolEff": "Volumetric Efficiency"}
+
+
+def _obj_label(name):
+    return _OBJ_LABELS.get(name, name)
+
 
 class ConvergencePlotWindow(QMainWindow):
     """Window showing convergence of objectives over generations"""
@@ -64,7 +71,7 @@ class ConvergencePlotWindow(QMainWindow):
         for i, obj in enumerate(self.objectives):
             ax = self.figure.add_subplot(n_objectives, 1, i+1)
             ax.set_xlabel('Generation')
-            ax.set_ylabel(f"{obj['name']} ({obj['mode']})")
+            ax.set_ylabel(f"{_obj_label(obj['name'])} ({obj['mode']})")
             ax.set_title(f"{obj['name']} Convergence")
             ax.grid(True, alpha=0.3)
             self.axes.append(ax)
@@ -100,7 +107,7 @@ class ConvergencePlotWindow(QMainWindow):
         for i, (ax, obj) in enumerate(zip(self.axes, self.objectives)):
             ax.clear()
             ax.set_xlabel('Generation')
-            ax.set_ylabel(f"{obj['name']} ({obj['mode']})")
+            ax.set_ylabel(f"{_obj_label(obj['name'])} ({obj['mode']})")
             ax.set_title(f"{obj['name']} Convergence")
             ax.grid(True, alpha=0.3)
             
@@ -201,8 +208,8 @@ class ParetoPlotWindow(QMainWindow):
         obj1 = self.objectives[0]
         obj2 = self.objectives[1]
         
-        self.ax.set_xlabel(f"{obj1['name']} ({obj1['mode']})")
-        self.ax.set_ylabel(f"{obj2['name']} ({obj2['mode']})")
+        self.ax.set_xlabel(f"{_obj_label(obj1['name'])} ({obj1['mode']})")
+        self.ax.set_ylabel(f"{_obj_label(obj2['name'])} ({obj2['mode']})")
         self.ax.set_title("Pareto Front")
         self.ax.grid(True, alpha=0.3)
         
@@ -265,8 +272,8 @@ class ParetoPlotWindow(QMainWindow):
                            edgecolors='black', linewidths=1.5,
                            label=f'Pareto front ({len(pareto_obj1)})', zorder=10)
         
-        self.ax.set_xlabel(f"{obj1_name} ({obj1['mode']})")
-        self.ax.set_ylabel(f"{obj2_name} ({obj2['mode']})")
+        self.ax.set_xlabel(f"{_obj_label(obj1_name)} ({obj1['mode']})")
+        self.ax.set_ylabel(f"{_obj_label(obj2_name)} ({obj2['mode']})")
         self.ax.set_title(f"Pareto Front ({len(self.all_designs)} designs)")
         self.ax.grid(True, alpha=0.3)
         self.ax.legend()
@@ -369,7 +376,7 @@ class ConstraintPlotWindow(QMainWindow):
         selector_layout.addWidget(QLabel("Plot objective:"))
         self.obj_combo = QComboBox()
         for obj in self.objectives:
-            self.obj_combo.addItem(obj['name'])
+            self.obj_combo.addItem(_obj_label(obj['name']), obj['name'])
         self.obj_combo.currentTextChanged.connect(self.update_plot)
         selector_layout.addWidget(self.obj_combo)
         selector_layout.addStretch()
@@ -435,7 +442,7 @@ class ConstraintPlotWindow(QMainWindow):
         self.ax.clear()
         
         # Get selected objective
-        obj_name = self.obj_combo.currentText()
+        obj_name = self.obj_combo.currentData()
         
         # Find minimize flag for this objective
         minimize = True
@@ -514,8 +521,8 @@ class ConstraintPlotWindow(QMainWindow):
                           label='Near boundary', zorder=5)
         
         # Formatting
-        direction = "â†“ minimize" if minimize else "â†‘ maximize"
-        self.ax.set_xlabel(f'{obj_name} ({direction})', fontsize=12, fontweight='bold')
+        direction = "↓ minimize" if minimize else "↑ maximize"
+        self.ax.set_xlabel(f'{_obj_label(obj_name)} ({direction})', fontsize=12, fontweight='bold')
         self.ax.set_ylabel('Geometric Constraint\n$X_2 / (1-X_1)^4$', 
                           fontsize=12, fontweight='bold')
         self.ax.set_title(f'Geometric Constraint vs {obj_name}\n(Paper Figure 11 Style)',

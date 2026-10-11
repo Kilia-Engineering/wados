@@ -13,6 +13,8 @@ from typing import Optional
 import numpy as np
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import handoff
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAction, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
@@ -204,21 +206,22 @@ class Canvas3D(_DarkFigureCanvas):
         Sb = wr.base_area()
         eta = wr.volumetric_efficiency()
 
-        lines = [
-            self.info_panel_header,
-            f"  Method          Var-Mach OC (Rodi)",
-            f"  Ma range        {Ma_range}",
-            f"  Shock β         {p['beta_deg']:.2f}°",
-            f"  Cone θc         {dc.min():.2f}-{dc.max():.2f}°",
-            f"  Length L_w      {p['L_w']:.3f} m",
-            f"  Span W          {p['W']:.3f} m",
-            f"  Flat L_s        {p['L_s']:.3f} m",
-            f"  Volume          {V:.4f} m³",
-            f"  S_wet           {Sw:.4f} m²",
-            f"  Planform S_p    {Sp:.4f} m²",
-            f"  Base S_b        {Sb:.4f} m²",
-            f"  Vol Efficiency  {eta:.4f}",
+        rows = [
+            ("Method", "Var-Mach OC (Rodi)"),
+            ("Ma range", Ma_range),
+            ("Shock β", f"{p['beta_deg']:.2f}°"),
+            ("Cone θc", f"{dc.min():.2f}-{dc.max():.2f}°"),
+            ("Length L_w", f"{p['L_w']:.3f} m"),
+            ("Span W", f"{p['W']:.3f} m"),
+            ("Flat L_s", f"{p['L_s']:.3f} m"),
+            ("Volume", f"{V:.4f} m³"),
+            ("S_wet", f"{Sw:.4f} m²"),
+            ("Planform S_p", f"{Sp:.4f} m²"),
+            ("Base S_b", f"{Sb:.4f} m²"),
+            ("Volumetric Efficiency", f"{eta:.4f}"),
         ]
+        key_w = max(len(k) for k, _ in rows)
+        lines = [self.info_panel_header] + [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,
@@ -791,27 +794,42 @@ class Liu2019WaveriderTab(QWidget):
         # view now shows all vehicle statistics, matching the SHADOW tab).
         actions = QHBoxLayout()
 
-        # Export menu button (STL / OBJ / STEP)
+        # Export: STL and STEP buttons, other formats under "More"
+        self.export_stl_btn = QPushButton("Export STL")
+        self.export_stl_btn.setToolTip(
+            "Closed binary triangle mesh including the base, in metres\n"
+            "(CFD, 3-D printing). Frame: x streamwise, y up, z span.")
+        self.export_stl_btn.clicked.connect(lambda: self._on_export("stl"))
+        actions.addWidget(self.export_stl_btn)
+
+        self.export_step_btn = QPushButton("Export STEP")
+        self.export_step_btn.setToolTip(
+            "Closed faceted solid including the base, in millimetres (CAD).")
+        self.export_step_btn.clicked.connect(lambda: self._on_export("step"))
+        actions.addWidget(self.export_step_btn)
+
         self.export_btn = QToolButton()
-        self.export_btn.setText("Export ▾")
+        self.export_btn.setText("More ▾")
         self.export_btn.setPopupMode(QToolButton.InstantPopup)
-        self.export_btn.setEnabled(False)
         self.export_btn.setToolTip(
-            "Export the waverider in one of:\n"
-            "  • STL  — closed binary triangle mesh incl. base, metres (CFD / 3D print)\n"
+            "Other export formats:\n"
             "  • OBJ  — Wavefront quadrilateral mesh of the wetted surfaces (viewers)\n"
-            "  • STEP (solid) — closed faceted solid incl. base, millimetres\n"
             "  • STEP (B-spline surfaces) — upper/lower B-spline faces as a shell, via OCP"
         )
         menu = QMenu(self.export_btn)
-        for label, fmt in (("Export STL…", "stl"), ("Export OBJ…", "obj"),
-                           ("Export STEP (solid)…", "step"),
+        for label, fmt in (("Export OBJ…", "obj"),
                            ("Export STEP (B-spline surfaces)…", "step_surfaces")):
             act = QAction(label, menu)
             act.triggered.connect(lambda _checked=False, f=fmt: self._on_export(f))
             menu.addAction(act)
         self.export_btn.setMenu(menu)
         actions.addWidget(self.export_btn)
+
+        self.send_aero_btn = handoff.send_button(self)
+        actions.addWidget(self.send_aero_btn)
+        self.send_opt_btn = handoff.optimize_button(self)
+        actions.addWidget(self.send_opt_btn)
+        self._set_export_enabled(False)
 
         self.run_aero_btn = QPushButton("Run aero (Ma 6, 8, 10, 13)")
         self.run_aero_btn.clicked.connect(self._on_run_aero)
@@ -950,7 +968,7 @@ class Liu2019WaveriderTab(QWidget):
 
         self.generate_btn.setEnabled(False)
         self.run_aero_btn.setEnabled(False)
-        self.export_btn.setEnabled(False)
+        self._set_export_enabled(False)
         self.progress_bar.setVisible(True)
 
         self._geom_worker = _GeometryWorker(params, n_z, n_x)
@@ -964,7 +982,7 @@ class Liu2019WaveriderTab(QWidget):
         self.progress_bar.setVisible(False)
         self.generate_btn.setEnabled(True)
         self.run_aero_btn.setEnabled(True)
-        self.export_btn.setEnabled(True)
+        self._set_export_enabled(True)
 
         self._redraw_3d()
         self.canvas_base.plot(wr, self._read_params())
@@ -1015,11 +1033,19 @@ class Liu2019WaveriderTab(QWidget):
     #  Export
     # --------------------------------------------------------------
     _EXPORT_META = {
-        "stl":  ("STL",  "*.stl",  "liu2019_waverider.stl"),
-        "obj":  ("OBJ",  "*.obj",  "liu2019_waverider.obj"),
-        "step": ("STEP", "*.step", "liu2019_waverider.step"),
-        "step_surfaces": ("STEP", "*.step", "liu2019_waverider_surfaces.step"),
+        "stl":  ("STL",  "*.stl",  ".stl"),
+        "obj":  ("OBJ",  "*.obj",  ".obj"),
+        "step": ("STEP", "*.step", ".step"),
+        "step_surfaces": ("STEP", "*.step", "_surfaces.step"),
     }
+    # Name in export dialogs and default file stem (the MFOF tab overrides)
+    _EXPORT_NAME = "Liu 2019"
+    _EXPORT_STEM = "liu2019_waverider"
+
+    def _set_export_enabled(self, enabled: bool):
+        for btn in (self.export_stl_btn, self.export_step_btn, self.export_btn,
+                    self.send_aero_btn):
+            btn.setEnabled(enabled)
 
     # Faceted STEP resolution: stations per half span x points per stream.
     # A faceted STEP costs about 2.4 kB per triangle, so the full grid
@@ -1040,13 +1066,25 @@ class Liu2019WaveriderTab(QWidget):
         return streams_to_mesh(upper, lower, full_span=True, n_points=n_points,
                                kind="liu2019_waverider")
 
+    def analysis_summary(self):
+        p = self.waverider.params
+        return (f"Ma {p['Ma_center']:g}-{p['Ma_tip']:g}, \u03b2={p['beta_deg']:g}\u00b0, "
+                f"L={p['L_w']:.3g} m")
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import write_temp_stl
+
+        return write_temp_stl(self._closed_mesh(), prefix=self._EXPORT_STEM + "_")
+
     def _on_export(self, fmt: str):
         if self.waverider is None:
             return
-        label, pattern, default_name = self._EXPORT_META[fmt]
+        label, pattern, suffix = self._EXPORT_META[fmt]
         path, _ = QFileDialog.getSaveFileName(
-            self, f"Export Liu 2019 waverider as {label}",
-            os.path.join(os.getcwd(), default_name),
+            self, f"Export {self._EXPORT_NAME} waverider as {label}",
+            os.path.join(os.getcwd(), self._EXPORT_STEM + suffix),
             f"{label} files ({pattern})")
         if not path:
             return
@@ -1099,7 +1137,8 @@ class Liu2019WaveriderTab(QWidget):
             ref = PAPER_REFERENCE_GEOMETRY[k]
             tol = TOLERANCES[k]
             dev = (v - ref) / ref if ref else 0.0
-            rows.append((k, v, ref, dev, abs(dev) <= tol))
+            label = "Volumetric Efficiency" if k == "eta" else k
+            rows.append((label, v, ref, dev, abs(dev) <= tol))
 
         for r in aero_rows:
             ref = PAPER_REFERENCE_AERO.get(int(r["Ma"]), {})

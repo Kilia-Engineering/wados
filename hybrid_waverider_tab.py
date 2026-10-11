@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QSplitter, QApplication, QScrollArea,
                              QComboBox, QTabWidget, QButtonGroup, QStackedWidget)
 from PyQt5.QtCore import Qt
+
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -141,23 +143,24 @@ class HybridCanvas3D(FigureCanvas):
         width = getattr(wr, 'width', 0)
         height = getattr(wr, 'height', 0)
         lines = [title]
-        lines.append(f"  Mach           {mach:.1f}")
-        lines.append(f"  beta OC        {beta_oc:.1f} deg")
+        rows = []
+        rows.append(("Mach", f"{mach:.1f}"))
+        rows.append(("beta OC", f"{beta_oc:.1f} deg"))
         if abs(beta_cd - beta_oc) > 0.01:
-            lines.append(f"  beta CD        {beta_cd:.1f} deg")
+            rows.append(("beta CD", f"{beta_cd:.1f} deg"))
         if hasattr(wr, 'h0'):
-            lines.append(f"  h root         {wr.h0:.2f}")
-            lines.append(f"  h tip          {wr.h1:.2f}")
+            rows.append(("h root", f"{wr.h0:.2f}"))
+            rows.append(("h tip", f"{wr.h1:.2f}"))
         if hasattr(wr, 'x_t'):
-            lines.append(f"  x_t            {wr.x_t:.2f}")
-            lines.append(f"  dx_t           {wr.dx_t:.2f}")
-        lines.append(f"  Length          {length:.4f} m")
+            rows.append(("x_t", f"{wr.x_t:.2f}"))
+            rows.append(("dx_t", f"{wr.dx_t:.2f}"))
+        rows.append(("Length", f"{length:.4f} m"))
 
         # Volume
         try:
             from waverider_gui import calculate_waverider_volume
             vol = calculate_waverider_volume(wr)
-            lines.append(f"  Volume          {vol:.6f} m³")
+            rows.append(("Volume", f"{vol:.6f} m³"))
         except Exception:
             vol = 0.0
 
@@ -165,15 +168,17 @@ class HybridCanvas3D(FigureCanvas):
         try:
             from reference_area_calculator import calculate_planform_area_from_waverider
             a_plan, _ = calculate_planform_area_from_waverider(wr)
-            lines.append(f"  Planform Area   {a_plan:.6f} m²")
+            rows.append(("Planform Area", f"{a_plan:.6f} m²"))
         except Exception:
             a_plan = 0.0
 
         # Volumetric efficiency: V^(2/3) / A_planform
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,
@@ -1073,6 +1078,8 @@ class HybridWaveriderTab(QWidget):
         self.shock_surface_check.setToolTip("Export conical shock as separate STEP body")
         self.shock_surface_check.setEnabled(CADQUERY_AVAILABLE)
         layout.addWidget(self.shock_surface_check, 3, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 4, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 5, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -1244,6 +1251,38 @@ class HybridWaveriderTab(QWidget):
     # ══════════════════════════════════════════════════════
     #  Export
     # ══════════════════════════════════════════════════════
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the OC shape X1-X4 and the blending at root and tip may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [V.around(k, k.upper(), p[k], span=0.15, lower=0.0, upper=1.0)
+                     for k in ('x1', 'x2', 'x3', 'x4')]
+        variables += [
+            V.around('alpha_root', 'OC share at the root', p['alpha_root'], span=0.25, lower=0.0, upper=1.0),
+            V.around('alpha_tip', 'OC share at the tip', p['alpha_tip'], span=0.25, lower=0.0, upper=1.0),
+            V.around('blend_exp', 'Blend exponent', p['blend_exp'], rel=0.5, lower=0.1, enabled=False),
+            V.around('x_t', 'Transition centre (x/L)', p['x_t'], span=0.15, lower=0.0, upper=1.0, enabled=False),
+        ]
+        notes = "X1-X4 outside the OC design space fail and are penalised."
+        return OptimizationCase('hybrid', 'Hybrid Waverider', p, variables, p['mach'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span; the half model mirrored)."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(wr.upper_surface_streams, wr.lower_surface_streams,
+                               full_span=True, kind="hybrid_waverider")
+        return write_temp_stl(mesh, prefix="hybrid_waverider_")
 
     def export_stl(self):
         if self.waverider is None:

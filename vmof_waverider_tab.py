@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QStackedWidget, QComboBox)
 from PyQt5.QtCore import Qt
 
+import handoff
+
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -119,20 +121,21 @@ class VMOFCanvas3D(FigureCanvas):
         length = getattr(wr, 'length', 0)
         direction = getattr(wr, 'direction', '')
         lines = [title]
-        lines.append(f"  Ma range       {ma_min:.0f} - {ma_max:.0f}")
-        lines.append(f"  beta           {beta:.1f} deg")
-        lines.append(f"  Direction      {direction}")
-        lines.append(f"  Length          {length:.4f} m")
+        rows = []
+        rows.append(("Ma range", f"{ma_min:.0f} - {ma_max:.0f}"))
+        rows.append(("beta", f"{beta:.1f} deg"))
+        rows.append(("Direction", f"{direction}"))
+        rows.append(("Length", f"{length:.4f} m"))
         if hasattr(wr, 'cone_angles_deg'):
             ca = wr.cone_angles_deg
-            lines.append(f"  Cone angles    {ca.min():.1f} - {ca.max():.1f} deg")
+            rows.append(("Cone angles", f"{ca.min():.1f} - {ca.max():.1f} deg"))
 
         vol = 0.0
         a_plan = 0.0
         try:
             from waverider_gui import calculate_waverider_volume
             vol = calculate_waverider_volume(wr)
-            lines.append(f"  Volume          {vol:.6f} m3")
+            rows.append(("Volume", f"{vol:.6f} m3"))
         except Exception:
             pass
 
@@ -150,14 +153,16 @@ class VMOFCanvas3D(FigureCanvas):
             if len(chords) > 2:
                 a_half = float(np.trapezoid(chords, z_pos))
                 a_plan = 2.0 * a_half  # full vehicle
-                lines.append(f"  Planform Area   {a_plan:.4f} m2")
+                rows.append(("Planform Area", f"{a_plan:.4f} m2"))
         except Exception:
             pass
 
         if a_plan > 1e-12 and vol > 0:
             eta_v = vol ** (2.0 / 3.0) / a_plan
-            lines.append(f"  Vol. Efficiency {eta_v:.4f}")
+            rows.append(("Volumetric Efficiency", f"{eta_v:.4f}"))
 
+        key_w = max((len(k) for k, _ in rows), default=0)
+        lines += [f"  {k:<{key_w}}  {v}" for k, v in rows]
         info = "\n".join(lines)
         self._info_text = self.fig.text(
             0.02, 0.98, info, transform=self.fig.transFigure,
@@ -608,6 +613,8 @@ class VMOFWaveriderTab(QWidget):
         layout.addWidget(tri_btn, 0, 1)
         layout.addWidget(step_btn, 1, 0, 1, 2)
         layout.addWidget(self.half_vehicle_check, 2, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 3, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 4, 0, 1, 2)
         group.setLayout(layout)
         return group
 
@@ -850,6 +857,36 @@ class VMOFWaveriderTab(QWidget):
     # ==============================================================
     #  Export
     # ==============================================================
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the OC shape X1-X4 and the shock angle may vary."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        p['blunt_radius_mm'] = self.blunt_radius_spin.value()
+        variables = [V.around(k, k.upper(), p[k], span=0.15, lower=0.0, upper=1.0)
+                     for k in ('x1', 'x2', 'x3', 'x4')]
+        variables.append(V.around('beta', 'Shock angle (deg)', p['beta'], span=1.5, lower=5.0,
+                                  upper=45.0, enabled=False))
+        notes = ("X1-X4 outside the OC design space fail and are penalised. The flight "
+                 "Mach number starts at the maximum Mach number of the design range.")
+        return OptimizationCase('vmof', 'VMOF Waverider', p, variables, p['ma_max'], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span; the half model mirrored)."""
+        from geometry_export import streams_to_mesh, write_temp_stl
+
+        wr = self.waverider
+        mesh = streams_to_mesh(wr.upper_surface_streams, wr.lower_surface_streams,
+                               full_span=True, kind="vmof_waverider")
+        return write_temp_stl(mesh, prefix="vmof_waverider_")
 
     def export_stl(self):
         if self.waverider is None:

@@ -159,6 +159,49 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
     and aero are routed through the :mod:`mfof` package.
     """
 
+    _EXPORT_NAME = "MFOF"
+    _EXPORT_STEM = "mfof_waverider"
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        shock angle, flat length and the base-curve heights y5, y6 may vary;
+        the Mach distribution can be added."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        params = self._read_params()
+        p = {"params": params, "n_z": self.n_z_spin.value(), "n_x": self.n_x_spin.value(),
+             "flowfield": self._current_flowfield_key(),
+             "power_law_n": float(self.n_powerlaw_spin.value())}
+        variables = [
+            V.around("params.beta_deg", "Shock angle (deg)", params["beta_deg"], span=1.0, lower=1.0, upper=60.0),
+            V.around("params.L_s", "Flat length L_s (m)", params["L_s"], rel=0.5, lower=0.0,
+                     upper=0.5 * params["W"]),
+            V.around("params.y5", "y5 (m)", params["y5"], rel=0.3, lower=1e-3),
+            V.around("params.y6", "y6 (m)", params["y6"], rel=0.3, lower=1e-3),
+            V.around("params.Ma_center", "Mach number at the centre", params["Ma_center"], span=1.0,
+                     lower=1.5, enabled=False),
+            V.around("params.Ma_tip", "Mach number at the tip", params["Ma_tip"], span=1.0,
+                     lower=1.5, enabled=False),
+        ]
+        notes = (f"Each design traces {p['n_z']} planes; 40-60 are enough for an "
+                 "optimization (Mesh resolution in the tab). Infeasible shock angles fail.")
+        return OptimizationCase("mfof", "MFOF Waverider", p, variables, params["Ma_center"], notes)
+
+    def apply_optimized_params(self, p):
+        """Load an optimized design (``optimization_case`` parameters) and generate it."""
+        q = p["params"]
+        for spin, key in ((self.beta_spin, "beta_deg"), (self.Lw_spin, "L_w"), (self.W_spin, "W"),
+                          (self.Ls_spin, "L_s"), (self.y5_spin, "y5"), (self.y6_spin, "y6"),
+                          (self.Ma_c_spin, "Ma_center"), (self.Ma_t_spin, "Ma_tip")):
+            spin.setValue(q[key])
+        self.n_z_spin.setValue(int(p["n_z"]))
+        self.n_x_spin.setValue(int(p["n_x"]))
+        label = {v: k for k, v in self._FF_COMBO_TO_KEY.items()}.get(p.get("flowfield", "cone"))
+        if label is not None:
+            self.flowfield_combo.setCurrentText(label)
+        self.n_powerlaw_spin.setValue(float(p.get("power_law_n", 1.0)))
+        self._on_generate()
+
     def __init__(self, parent=None):
         # Pre-create the equivalence-cache attribute so super().__init__'s
         # call to _on_geometry_ready (if any) doesn't AttributeError.
@@ -312,7 +355,7 @@ class MFOFWaveriderTab(Liu2019WaveriderTab):
 
         self.generate_btn.setEnabled(False)
         self.run_aero_btn.setEnabled(False)
-        self.export_btn.setEnabled(False)
+        self._set_export_enabled(False)
         self.progress_bar.setVisible(True)
 
         # Hint to the user that power-law takes much longer than cone/wedge

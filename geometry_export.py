@@ -23,6 +23,7 @@ faceted STEP solid (``gvwd.export.step.write_step``, which needs cadquery).
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -34,8 +35,12 @@ __all__ = [
     "grid_to_streams",
     "select_stations",
     "streams_to_mesh",
+    "mesh_volume",
+    "mesh_planform_area",
+    "stream_volume",
     "span_frame_to_gui",
     "write_stl",
+    "write_temp_stl",
     "write_step",
     "StepUnavailableError",
 ]
@@ -151,6 +156,43 @@ def streams_to_mesh(upper_streams: Sequence[np.ndarray], lower_streams: Sequence
     return Mesh(v, f, metadata={"kind": kind})
 
 
+def mesh_volume(mesh) -> float:
+    """Volume enclosed by a closed triangle mesh (divergence theorem).
+
+    Positive when the normals point outward.
+    """
+    v = np.asarray(mesh.vertices, dtype=float)
+    t = v[np.asarray(mesh.faces, dtype=int)]
+    return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+
+
+def mesh_planform_area(mesh) -> float:
+    """Planform area (projection on the x-z plane) of a closed mesh.
+
+    Both the upper and the lower surface project onto the planform, so the
+    summed projection of all triangles is halved.
+    """
+    v = np.asarray(mesh.vertices, dtype=float)
+    t = v[np.asarray(mesh.faces, dtype=int)]
+    a = t[:, 1] - t[:, 0]
+    b = t[:, 2] - t[:, 0]
+    return float(0.25 * np.abs(a[:, 0] * b[:, 2] - a[:, 2] * b[:, 0]).sum())
+
+
+def stream_volume(upper_streams: Sequence[np.ndarray], lower_streams: Sequence[np.ndarray], *,
+                  full_span: bool = False, span_axis: int = 2) -> float:
+    """Volume of the closed body bounded by the upper and lower streams.
+
+    Exact for the triangulated surface (``streams_to_mesh``), whatever the
+    streams' x positions: each stream starts at its own leading-edge point.
+    ``full_span`` mirrors a half model as in ``streams_to_mesh``. Returns the
+    magnitude, so the stream order does not matter.
+    """
+    mesh = streams_to_mesh(upper_streams, lower_streams, full_span=full_span,
+                           span_axis=span_axis)
+    return abs(mesh_volume(mesh))
+
+
 def _weld(v: np.ndarray, f: np.ndarray, rel_tol: float = 1e-9):
     """Merge coincident vertices and drop degenerate triangles.
 
@@ -177,6 +219,19 @@ def write_stl(mesh, path, *, scale: float = 1.0) -> Path:
     from gvwd.export.stl import write_stl as _write_stl
 
     return Path(_write_stl(mesh, path, scale=scale))
+
+
+def write_temp_stl(mesh, prefix: str = "wados_") -> str:
+    """Binary STL (metres) in a new temporary file, for the Aero Analysis tab.
+
+    The caller owns the file; the hub keeps it as the analysis mesh.
+    """
+    import tempfile
+
+    fd, path = tempfile.mkstemp(suffix=".stl", prefix=prefix)
+    os.close(fd)
+    write_stl(mesh, path)
+    return path
 
 
 def write_step(mesh, path, *, scale: float = 1000.0) -> Path:

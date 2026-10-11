@@ -34,6 +34,8 @@ jobs:
           # Vendored aero solver dependencies
           pip install numpy-stl trimesh
           pip install -e ./pysagas
+          # Genetic-algorithm optimization (method_optimization tests)
+          pip install pymoo
 
       - name: Run GVWD test suite
         run: pytest gvwd/tests/ -q

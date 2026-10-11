@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (
     QScrollArea, QComboBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
+
+import handoff
 from PyQt5.QtGui import QFont
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -626,29 +628,31 @@ class PlanarWaveriderCanvas(FigureCanvas):
         bw, bh = wr.base_dimensions()
         vol = wr.volume()
         S_ref = res.get('S_ref', 0)
-        # Volumetric efficiency: V / S_ref^(3/2)
-        vol_eff = vol / S_ref**1.5 if S_ref > 1e-8 else 0.0
+        # Volumetric efficiency V^(2/3) / S_planform (Jessen Eq. 2.5), as in
+        # the optimizer below and the other tabs
+        vol_eff = vol ** (2.0 / 3.0) / S_ref if S_ref > 1e-8 and vol > 0 else 0.0
 
-        info = (
-            "WAVERIDER INFO\n"
-            f"  Method          Planar (Jessen 2026)\n"
-            f"  Mach            {res.get('M_inf', 0):.2f}\n"
-            f"  Shock \u03b2         {wr.beta_deg:.2f}\u00b0\n"
-            f"  Wedge \u03b8         {wr.wedge_angle_deg:.4f}\u00b0\n"
-            f"  Power-law n     {wr.n:.2f}\n"
-            f"  Epsilon         {wr.epsilon:.3f}\n"
-            f"  p1, p2, p3      {wr.p1:.2f}, {wr.p2:.2f}, {wr.p3:.2f}\n"
-            f"  LE Radius       {wr.R:.4f} m\n"
-            f"  Length           {wr.length:.4f} m\n"
-            f"  Width            {wr.width:.4f} m\n"
-            f"  Planform Area    {S_ref:.4f} m\u00b2\n"
-            f"  Volume           {vol:.6f} m\u00b3\n"
-            f"  Vol Efficiency   {vol_eff:.6f}\n"
-            f"  Base             {bw:.4f} x {bh:.4f} m\n"
-            f"  L/D              {res.get('L_over_D', 0):.4f}\n"
-            f"  CL               {res.get('CL', 0):.6f}\n"
-            f"  CD               {res.get('CD', 0):.6f}"
-        )
+        rows = [
+            ("Method", "Planar (Jessen 2026)"),
+            ("Mach", f"{res.get('M_inf', 0):.2f}"),
+            ("Shock \u03b2", f"{wr.beta_deg:.2f}\u00b0"),
+            ("Wedge \u03b8", f"{wr.wedge_angle_deg:.4f}\u00b0"),
+            ("Power-law n", f"{wr.n:.2f}"),
+            ("Epsilon", f"{wr.epsilon:.3f}"),
+            ("p1, p2, p3", f"{wr.p1:.2f}, {wr.p2:.2f}, {wr.p3:.2f}"),
+            ("LE Radius", f"{wr.R:.4f} m"),
+            ("Length", f"{wr.length:.4f} m"),
+            ("Width", f"{wr.width:.4f} m"),
+            ("Planform Area", f"{S_ref:.4f} m\u00b2"),
+            ("Volume", f"{vol:.6f} m\u00b3"),
+            ("Volumetric Efficiency", f"{vol_eff:.6f}"),
+            ("Base", f"{bw:.4f} x {bh:.4f} m"),
+            ("L/D", f"{res.get('L_over_D', 0):.4f}"),
+            ("CL", f"{res.get('CL', 0):.6f}"),
+            ("CD", f"{res.get('CD', 0):.6f}"),
+        ]
+        key_w = max(len(k) for k, _ in rows)
+        info = "WAVERIDER INFO\n" + "\n".join(f"  {k:<{key_w}}  {v}" for k, v in rows)
 
         self.fig.text(
             0.02, 0.97, info, transform=self.fig.transFigure,
@@ -1108,10 +1112,8 @@ class PlanarWaveriderTab(QWidget):
             step_btn.setToolTip("CadQuery not available")
         layout.addWidget(step_btn, 0, 1)
 
-        send_btn = QPushButton("Send to Aero Tab")
-        send_btn.setToolTip("Send mesh to main Aero Analysis tab")
-        send_btn.clicked.connect(self._send_to_aero_tab)
-        layout.addWidget(send_btn, 1, 0, 1, 2)
+        layout.addWidget(handoff.send_button(self), 1, 0, 1, 2)
+        layout.addWidget(handoff.optimize_button(self), 2, 0, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -1185,7 +1187,7 @@ class PlanarWaveriderTab(QWidget):
         self.opt_maxiter_spin.setToolTip("Maximum DE generations")
         settings_grid.addWidget(self.opt_maxiter_spin, 0, 3)
 
-        settings_grid.addWidget(QLabel("eta_vol min:"), 1, 0)
+        settings_grid.addWidget(QLabel("Volumetric Efficiency min:"), 1, 0)
         self.opt_eta_spin = QDoubleSpinBox()
         self.opt_eta_spin.setDecimals(4)
         self.opt_eta_spin.setRange(0.0, 1.0)
@@ -1318,7 +1320,7 @@ class PlanarWaveriderTab(QWidget):
         self.opt_status_label.setText(
             f"Gen {iteration}/{maxiter}  |  "
             f"Best L/D: {best_LD:.4f}  |  "
-            f"eta_vol: {best_eta:.5f}")
+            f"Volumetric Efficiency: {best_eta:.5f}")
 
     def _on_opt_complete(self, result):
         """Handle completed optimization."""
@@ -1339,7 +1341,7 @@ class PlanarWaveriderTab(QWidget):
 
         self.opt_progress_bar.setValue(self.opt_progress_bar.maximum())
         self.opt_status_label.setText(
-            f"Done! Best L/D: {LD:.4f} | eta_vol: {eta:.5f}\n"
+            f"Done! Best L/D: {LD:.4f} | Volumetric Efficiency: {eta:.5f}\n"
             f"Evals: {n_evals} (cache hits: {n_hits})\n"
             f"{var_str}")
 
@@ -1734,23 +1736,47 @@ class PlanarWaveriderTab(QWidget):
         self.progress_label.setText("STEP export failed")
         QMessageBox.critical(self, "Error", msg)
 
-    def _send_to_aero_tab(self):
-        """Send mesh data to the main aero analysis tab."""
-        if self.waverider is None:
-            QMessageBox.warning(self, "Warning", "Generate waverider first!")
-            return
-        if self.parent_gui and hasattr(self.parent_gui, 'imported_geometry'):
-            verts, faces = self.waverider.get_mesh()
-            self.parent_gui.imported_geometry = {
-                'vertices': verts,
-                'faces': faces,
-                'source': 'planar_waverider',
-                'params': self.waverider.to_dict(),
-            }
-            QMessageBox.information(
-                self, "Sent",
-                "Planar waverider mesh sent to Aero Analysis tab.")
-        else:
-            QMessageBox.warning(
-                self, "Warning",
-                "Parent GUI or imported_geometry not available.")
+    _BLUNTING = {0: 'none', 1: 'inscribed', 2: 'bezier_g2', 3: 'tb_exterior'}
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the planform and shock parameters of the tab's own optimizer, with
+        its bounds; the width (the size) is left fixed by default."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+        from planar_waverider_optimizer import PlanarWaveriderOptimizer
+
+        p = self.get_params_dict()
+        p['blunting_method'] = self._BLUNTING.get(self.blunting_combo.currentIndex(), 'none')
+        B = PlanarWaveriderOptimizer.DEFAULT_BOUNDS
+        L = p['length']
+        variables = [
+            V('width', 'Width (m)', p['width'], B['width'][0] * L, B['width'][1] * L, enabled=False),
+            V('n', 'Power-law exponent n', p['n'], *B['n']),
+            V('beta', 'Shock angle beta (deg)', p['beta'], *B['beta_deg']),
+            V('epsilon', 'Epsilon', p['epsilon'], *B['epsilon']),
+            V('p1', 'p1', p['p1'], *B['p1']),
+            V('p2', 'p2', p['p2'], *B['p2']),
+            V('p3', 'p3', p['p3'], *B['p3']),
+        ]
+        return OptimizationCase('planar', 'Planar Waverider', p, variables, p['mach'])
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        inverse = {v: k for k, v in self._BLUNTING.items()}
+        self.blunting_combo.setCurrentIndex(inverse.get(params.get('blunting_method'), 0))
+        self.generate_waverider()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span). The planar generator works in
+        x streamwise, y span, z up, with one stream per grid row."""
+        from geometry_export import (grid_to_streams, span_frame_to_gui,
+                                     streams_to_mesh, write_temp_stl)
+
+        wr = self.waverider
+        upper = grid_to_streams(wr.upper_surface_x, wr.upper_surface_y, wr.upper_surface_z)
+        lower = grid_to_streams(wr.lower_surface_x, wr.lower_surface_y, wr.lower_surface_z)
+        mesh = streams_to_mesh(upper, lower, span_axis=1, kind="planar_waverider")
+        return write_temp_stl(span_frame_to_gui(mesh), prefix="planar_waverider_")
+

@@ -13,6 +13,12 @@ import numpy as np
 from scipy.spatial import ConvexHull
 
 
+def _cross2(a, b):
+    """z-component of the cross product of two 2-D vectors (NumPy 2 no
+    longer accepts 2-D vectors in np.cross)."""
+    return a[0] * b[1] - a[1] * b[0]
+
+
 def calculate_planform_area_from_waverider(waverider):
     """
     Calculate accurate planform area from waverider geometry.
@@ -58,8 +64,8 @@ def calculate_planform_area_from_waverider(waverider):
             
             # Calculate area of quadrilateral using cross product
             # Split into two triangles
-            area1 = 0.5 * abs(np.cross(p2 - p1, p3 - p1))
-            area2 = 0.5 * abs(np.cross(p3 - p1, p4 - p1))
+            area1 = 0.5 * abs(_cross2(p2 - p1, p3 - p1))
+            area2 = 0.5 * abs(_cross2(p3 - p1, p4 - p1))
             total_area += (area1 + area2)
     
     # This is one half (Z >= 0), so double it for full vehicle
@@ -189,41 +195,44 @@ def calculate_reference_area_from_stl(stl_filename):
 
 def _calculate_area_from_stl_manual(stl_filename):
     """
-    Manual STL parsing as fallback.
+    Projected planform area (x-z plane) of a binary STL.
+
+    On a closed surface every planform point is covered twice, by the upper
+    and the lower surface, so the summed projection is halved. An open
+    surface (a single skin) is counted once.
     """
     import struct
-    
+
     with open(stl_filename, 'rb') as f:
-        # Read header (80 bytes)
-        header = f.read(80)
-        
-        # Read number of triangles
-        n_triangles = struct.unpack('I', f.read(4))[0]
-        
-        total_area = 0.0
-        
-        for _ in range(n_triangles):
-            # Read normal (3 floats, skip)
-            f.read(12)
-            
-            # Read 3 vertices (9 floats)
-            v1 = struct.unpack('fff', f.read(12))
-            v2 = struct.unpack('fff', f.read(12))
-            v3 = struct.unpack('fff', f.read(12))
-            
-            # Project onto X-Z plane (indices 0 and 2)
-            p1 = np.array([v1[0], v1[2]])
-            p2 = np.array([v2[0], v2[2]])
-            p3 = np.array([v3[0], v3[2]])
-            
-            # Area of projected triangle
-            area = 0.5 * abs(np.cross(p2 - p1, p3 - p1))
-            total_area += area
-            
-            # Read attribute byte count (2 bytes, skip)
-            f.read(2)
-    
-    return total_area, "Manual STL parsing"
+        f.read(80)                                       # header
+        n_triangles = struct.unpack('<I', f.read(4))[0]
+        rec = np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("attr", "<u2")])
+        data = np.frombuffer(f.read(n_triangles * rec.itemsize), dtype=rec,
+                         count=n_triangles)
+    tri = data["v"].astype(float)
+
+    # Area of each triangle projected onto the x-z plane
+    a = tri[:, 1] - tri[:, 0]
+    b = tri[:, 2] - tri[:, 0]
+    total_area = 0.5 * np.abs(a[:, 0] * b[:, 2] - a[:, 2] * b[:, 0]).sum()
+
+    if _is_closed(tri):
+        return 0.5 * total_area, "STL projection (closed surface, halved)"
+    return total_area, "STL projection (open surface)"
+
+
+def _is_closed(tri, rel_tol=1e-6):
+    """True when every edge of the triangle soup is shared by exactly two triangles."""
+    if len(tri) == 0:
+        return False
+    size = float(np.ptp(tri.reshape(-1, 3), axis=0).max()) or 1.0
+    key = np.round(tri.reshape(-1, 3) / (rel_tol * size)).astype(np.int64)
+    _, idx = np.unique(key, axis=0, return_inverse=True)
+    f = idx.ravel().reshape(-1, 3)
+    edges = np.sort(np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]), axis=1)
+    edges = edges[edges[:, 0] != edges[:, 1]]
+    _, counts = np.unique(edges, axis=0, return_counts=True)
+    return bool(np.all(counts == 2))
 
 
 def calculate_reference_area_convex_hull(waverider):

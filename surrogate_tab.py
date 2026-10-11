@@ -577,8 +577,10 @@ class SurrogateWorker(QThread):
                     p3 = np.array([X[i+1, j+1], Z[i+1, j+1]])
                     p4 = np.array([X[i, j+1], Z[i, j+1]])
                     
-                    area1 = 0.5 * abs(np.cross(p2 - p1, p3 - p1))
-                    area2 = 0.5 * abs(np.cross(p3 - p1, p4 - p1))
+                    # 2-D cross products (np.cross needs 3-D vectors in NumPy 2)
+                    a, b, c = p2 - p1, p3 - p1, p4 - p1
+                    area1 = 0.5 * abs(a[0] * b[1] - a[1] * b[0])
+                    area2 = 0.5 * abs(b[0] * c[1] - b[1] * c[0])
                     total_area += (area1 + area2)
             
             return 2.0 * total_area
@@ -692,14 +694,13 @@ class SurrogateWorker(QThread):
                 # Calculate reference area (planform area) for this specific design
                 A_ref = self._calculate_planform_area(waverider_obj)
                 
-                # Calculate volume from geometry
+                # Volume of the closed full-span body (as the OC tab reports it)
                 try:
-                    x_range = waverider_obj.upper_surface_x.max() - waverider_obj.upper_surface_x.min()
-                    y_range = waverider_obj.upper_surface_y.max() - waverider_obj.upper_surface_y.min()
-                    z_range = waverider_obj.upper_surface_z.max()
-                    volume = 0.3 * x_range * y_range * (2 * z_range)
-                except:
-                    volume = height * width * 2.0
+                    from geometry_export import stream_volume
+                    volume = stream_volume(waverider_obj.upper_surface_streams,
+                                           waverider_obj.lower_surface_streams, full_span=True)
+                except Exception as e:
+                    return {'success': False, 'error': f'Volume calculation failed: {e}'}
                 
                 # Export to STEP with error handling
                 step_file = os.path.join(temp_dir, 'waverider.step')

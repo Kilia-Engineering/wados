@@ -24,6 +24,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDialog, QTextEdit, QDialogButtonBox,
                              QFileDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+import handoff
 from PyQt5.QtGui import QFont
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -208,22 +210,24 @@ class PSWRCanvas3D(FigureCanvas):
             CL = CD = LD = Cm = float('nan')
 
         b0, b1, b2 = wr.beta_knots_deg
-        lines = [title]
-        lines.append(f"  M_inf          {wr.M_inf:.2f}")
-        lines.append(f"  beta knots     {b0:.2f} / {b1:.2f} / {b2:.2f} deg")
-        lines.append(f"  Lambda          {wr.Lambda_deg:.2f} deg")
-        lines.append(f"  Length          {wr.body_length:.4f} m")
-        lines.append(f"  Tip half-span   {wr.y_tip:.4f} m")
-        lines.append(f"  theta range    "
-                     f"{wr.theta_y_deg.min():.3f} - "
-                     f"{wr.theta_y_deg.max():.3f} deg")
-        lines.append(f"  Volume          {V:.4f} m^3")
-        lines.append(f"  Planform area   {S:.4f} m^2")
-        lines.append(f"  eta_V          {eta_v:.4f}")
-        lines.append(f"  CL              {CL:.4f}")
-        lines.append(f"  CD (wave)       {CD:.4f}")
-        lines.append(f"  L/D             {LD:.3f}")
-        lines.append(f"  Cm (x=L/2)     {Cm:.4f}")
+        rows = [
+            ("M_inf", f"{wr.M_inf:.2f}"),
+            ("beta knots", f"{b0:.2f} / {b1:.2f} / {b2:.2f} deg"),
+            ("Lambda", f"{wr.Lambda_deg:.2f} deg"),
+            ("Length", f"{wr.body_length:.4f} m"),
+            ("Tip half-span", f"{wr.y_tip:.4f} m"),
+            ("theta range", f"{wr.theta_y_deg.min():.3f} - "
+                            f"{wr.theta_y_deg.max():.3f} deg"),
+            ("Volume", f"{V:.4f} m^3"),
+            ("Planform area", f"{S:.4f} m^2"),
+            ("Volumetric Efficiency", f"{eta_v:.4f}"),
+            ("CL", f"{CL:.4f}"),
+            ("CD (wave)", f"{CD:.4f}"),
+            ("L/D", f"{LD:.3f}"),
+            ("Cm (x=L/2)", f"{Cm:.4f}"),
+        ]
+        width = max(len(k) for k, _ in rows)
+        lines = [title] + [f"  {k:<{width}}  {v}" for k, v in rows]
 
         info = "\n".join(lines)
         self._info_text = self.fig.text(
@@ -352,7 +356,7 @@ class _ParetoCanvas(FigureCanvas):
         self.ax3d.scatter(LD, sig, eta, c='#ef4444', s=18, depthshade=False)
         self.ax3d.set_xlabel('L/D')
         self.ax3d.set_ylabel('max sigma_b [dBsm]')
-        self.ax3d.set_zlabel('eta_V')
+        self.ax3d.set_zlabel('Volumetric Efficiency')
         self.ax3d.set_title(f'Pareto 3-D ({F.shape[0]} solutions)')
 
         self.ax_ld_sig.scatter(LD, sig, c='#ef4444', s=18)
@@ -360,12 +364,12 @@ class _ParetoCanvas(FigureCanvas):
         self.ax_ld_sig.set_title('L/D vs RCS'); self.ax_ld_sig.grid(True, alpha=0.3)
 
         self.ax_ld_eta.scatter(LD, eta, c='#3b82f6', s=18)
-        self.ax_ld_eta.set_xlabel('L/D'); self.ax_ld_eta.set_ylabel('eta_V')
-        self.ax_ld_eta.set_title('L/D vs eta_V'); self.ax_ld_eta.grid(True, alpha=0.3)
+        self.ax_ld_eta.set_xlabel('L/D'); self.ax_ld_eta.set_ylabel('Volumetric Efficiency')
+        self.ax_ld_eta.set_title('L/D vs Volumetric Efficiency'); self.ax_ld_eta.grid(True, alpha=0.3)
 
         self.ax_sig_eta.scatter(sig, eta, c='#16a34a', s=18)
-        self.ax_sig_eta.set_xlabel('sigma_b [dBsm]'); self.ax_sig_eta.set_ylabel('eta_V')
-        self.ax_sig_eta.set_title('RCS vs eta_V'); self.ax_sig_eta.grid(True, alpha=0.3)
+        self.ax_sig_eta.set_xlabel('sigma_b [dBsm]'); self.ax_sig_eta.set_ylabel('Volumetric Efficiency')
+        self.ax_sig_eta.set_title('RCS vs Volumetric Efficiency'); self.ax_sig_eta.grid(True, alpha=0.3)
 
         self.fig.suptitle(label, fontsize=11)
         self.fig.tight_layout()
@@ -715,19 +719,23 @@ class PSWRWaveriderTab(QWidget):
         self.export_step_btn.setToolTip(
             "Faceted full-span STEP solid in millimetres (needs cadquery)")
         self.export_step_btn.clicked.connect(self.export_step)
-        for b in (self.export_stl_btn, self.export_step_btn):
+        self.send_aero_btn = handoff.send_button(self)
+        for b in (self.export_stl_btn, self.export_step_btn, self.send_aero_btn):
             b.setStyleSheet(export_style)
             b.setEnabled(False)
             export_row.addWidget(b)
         export_wrap = QWidget(); export_wrap.setLayout(export_row)
         left_layout.addWidget(export_wrap)
+        self.send_opt_btn = handoff.optimize_button(self)
+        self.send_opt_btn.setStyleSheet(export_style)
+        left_layout.addWidget(self.send_opt_btn)
 
         self.status_label = QLabel("Ready")
         self.status_label.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(self.status_label)
 
         self.derived_label = QLabel(
-            "theta range: --\nVolume: --\nPlanform area: --\neta_V: --")
+            "theta range: --\nVolume: --\nPlanform area: --\nVolumetric Efficiency: --")
         self.derived_label.setStyleSheet(
             "color: #aaaaaa; font-size: 10px; font-family: monospace; "
             "background-color: #1A1A1A; padding: 6px; border-radius: 3px;")
@@ -989,7 +997,7 @@ class PSWRWaveriderTab(QWidget):
         self.lambda_spin.setToolTip(
             "Leading-edge sweep angle, measured from the spanwise (y) axis.\n"
             "Higher Lambda = more highly-swept LE = narrower vehicle, longer\n"
-            "body for the same span, higher volumetric efficiency eta_V.\n"
+            "body for the same span, higher volumetric efficiency.\n"
             "\n"
             "Typical waverider sweep: 55-80 deg.\n"
             "Lambda also reduces stagnation-line heat flux as sqrt(cos Lambda)\n"
@@ -1004,7 +1012,8 @@ class PSWRWaveriderTab(QWidget):
         self.length_spin.setDecimals(3)
         self.length_spin.setToolTip(
             "Streamwise length from apex to base plane, in meters.\n"
-            "Volume scales as L^3, planform area as L^2, so eta_V is L-invariant.\n"
+            "Volume scales as L^3, planform area as L^2, so the volumetric\n"
+            "efficiency is L-invariant.\n"
             "Default 10 m is typical hypersonic glide vehicle scale.")
         layout.addWidget(self.length_spin, 1, 1)
 
@@ -1043,7 +1052,7 @@ class PSWRWaveriderTab(QWidget):
         self.n_span_spin.setToolTip(
             "Number of stations across the full span [-y_tip, +y_tip].\n"
             "Higher = smoother surface and more accurate y-quadrature for\n"
-            "C_L, C_D, V, eta_V, but slower geometry build.\n"
+            "C_L, C_D, V, volumetric efficiency, but slower geometry build.\n"
             "Always rounded up to odd to keep y=0 sampled.\n"
             "41 = quick exploration, 201+ = production-quality integrals.")
         layout.addWidget(self.n_span_spin, 0, 1)
@@ -1379,7 +1388,8 @@ class PSWRWaveriderTab(QWidget):
         "              Constraint: Mach angle < beta < detachment angle.\n"
         "  Lambda      LE sweep from spanwise axis, deg. 55-80 typical.\n"
         "  L           Body length apex-to-base, m.\n"
-        "  eta_V       Volumetric efficiency = V^(2/3) / S_planform. Bigger =\n"
+        "  Volumetric Efficiency\n"
+        "              V^(2/3) / S_planform. Bigger =\n"
         "              more 'fat' for the same wetted area (good for fuel).\n\n"
         "SHOCK / FLOW\n"
         "------------\n"
@@ -1432,7 +1442,8 @@ class PSWRWaveriderTab(QWidget):
         "              wall-normal extent of the plasma sheath.\n\n"
         "OPTIMIZATION\n"
         "------------\n"
-        "  F vector    NSGA-II minimises F = (-L/D, max sigma_b dBsm, -eta_V).\n"
+        "  F vector    NSGA-II minimises F = (-L/D, max sigma_b dBsm,\n"
+        "              -Volumetric Efficiency).\n"
         "  G vector    Constraints g <= 0:  g1 detach, g2 mach,\n"
         "                                     g3 Fay-Riddell, g4 Born.\n"
         "  Pareto front  Set of non-dominated designs — no other design is\n"
@@ -1646,6 +1657,7 @@ class PSWRWaveriderTab(QWidget):
             self.status_label.setStyleSheet("color: green")
             self.export_stl_btn.setEnabled(True)
             self.export_step_btn.setEnabled(True)
+            self.send_aero_btn.setEnabled(True)
 
         except Exception as e:
             self.status_label.setText(f"Error: {str(e)}")
@@ -1675,6 +1687,37 @@ class PSWRWaveriderTab(QWidget):
         lower = [to_gui_frame(s) for s in wr.lower_surface_streams]
         return streams_to_mesh(upper, lower, full_span=False, n_points=n_points,
                                kind="pswr1_waverider")
+
+    def optimization_case(self):
+        """The current inputs as an optimization case (method_optimization):
+        the three shock-angle knots, the sweep and the flat fraction may vary;
+        Mach number, length and resolution stay."""
+        from method_optimization import DesignVariable as V, OptimizationCase
+
+        p = self.get_params_dict()
+        variables = [
+            V.around("beta0_deg", "Shock angle at the centre (deg)", p["beta0_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("beta1_deg", "Shock angle at mid-span (deg)", p["beta1_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("beta2_deg", "Shock angle at the tip (deg)", p["beta2_deg"], span=2.0, lower=1.0, upper=60.0),
+            V.around("lambda_deg", "Leading-edge sweep Lambda (deg)", p["lambda_deg"], span=5.0, lower=20.0, upper=89.0),
+            V.around("flat_fraction", "Flat fraction", p["flat_fraction"], span=0.15, lower=0.0, upper=0.6,
+                     enabled=False),
+        ]
+        notes = ("Shock angles outside the Mach angle–detachment range fail and are "
+                 "penalised.")
+        return OptimizationCase("pswr", "PSWR-1 Waverider", p, variables, p["M_inf"], notes)
+
+    def apply_optimized_params(self, params):
+        """Load an optimized design (a ``get_params_dict`` dict) and generate it."""
+        self.set_params_dict(params)
+        self.generate_waverider()
+
+    def stl_for_analysis(self):
+        """Closed full-span mesh as a temporary STL for the Aero Analysis tab
+        (metres, x streamwise, y up, z span), as Export STL writes it."""
+        from geometry_export import write_temp_stl
+
+        return write_temp_stl(self._export_mesh(), prefix="pswr1_waverider_")
 
     def export_stl(self):
         if self.waverider is None:
@@ -1783,12 +1826,12 @@ class PSWRWaveriderTab(QWidget):
             self.derived_label.setText(f"Derived calc error: {e}")
             return
         self.derived_label.setText(
-            f"theta range  : "
+            f"theta range          : "
             f"{wr.theta_y_deg.min():.3f} - {wr.theta_y_deg.max():.3f} deg\n"
-            f"V (full body): {V:.4f} m^3\n"
-            f"S_planform   : {S:.4f} m^2\n"
-            f"eta_V        : {eta_v:.4f}\n"
-            f"CL / CD / L/D: {aero['CL']:.4f} / {aero['CD']:.4f} / "
+            f"V (full body)        : {V:.4f} m^3\n"
+            f"S_planform           : {S:.4f} m^2\n"
+            f"Volumetric Efficiency: {eta_v:.4f}\n"
+            f"CL / CD / L/D        : {aero['CL']:.4f} / {aero['CD']:.4f} / "
             f"{aero['LD']:.3f}\n"
             f"streamline residual: {res:.2e}\n"
             f"warnings: {wr.warnings or 'none'}")
@@ -1917,15 +1960,15 @@ class PSWRWaveriderTab(QWidget):
             txt = []
             txt.append(f"Caret M={M:.2f}, beta={beta_caret_deg:.1f}, "
                        f"Lambda={Lam:.1f}, L={L:.2f}")
-            txt.append(f"  Cp_low ana={ana['Cp_low']:.6f}  num={cp_num:.6f}  "
+            txt.append(f"  Cp_low                ana={ana['Cp_low']:.6f}  num={cp_num:.6f}  "
                        f"err={cp_err:.4f}%  [{cp_pass}]")
-            txt.append(f"  eta_V  ana={ana['eta_V']:.6f}  num={eta_num:.6f}  "
+            txt.append(f"  Volumetric Efficiency ana={ana['eta_V']:.6f}  num={eta_num:.6f}  "
                        f"err={eta_err:.4f}%  [{eta_pass}]")
-            txt.append(f"  V      ana={ana['V']:.4f}    num={V_num:.4f}    "
+            txt.append(f"  V                     ana={ana['V']:.4f}    num={V_num:.4f}    "
                        f"err={V_err:.4f}%")
-            txt.append(f"  CL     ana={aero_ana['CL']:.6f}  num={aero_num['CL']:.6f}  "
+            txt.append(f"  CL                    ana={aero_ana['CL']:.6f}  num={aero_num['CL']:.6f}  "
                        f"err={cl_err:.4f}%  [{cl_pass}]")
-            txt.append(f"  CD     ana={aero_ana['CD']:.6f}  num={aero_num['CD']:.6f}  "
+            txt.append(f"  CD                    ana={aero_ana['CD']:.6f}  num={aero_num['CD']:.6f}  "
                        f"err={cd_err:.4f}%  [{cd_pass}]")
             txt.append(f"  streamline residual={res_num:.2e}  [{res_pass}]")
             txt.append("")
@@ -1934,7 +1977,7 @@ class PSWRWaveriderTab(QWidget):
             txt.append(f"  theta range "
                        f"{wr_demo.theta_y_deg.min():.3f}-"
                        f"{wr_demo.theta_y_deg.max():.3f} deg")
-            txt.append(f"  V={V_demo:.4f}  S={S_demo:.4f}  eta_V={eta_demo:.4f}")
+            txt.append(f"  V={V_demo:.4f}  S={S_demo:.4f}  Volumetric Efficiency={eta_demo:.4f}")
             txt.append(f"  non-degenerate: {demo_pass}")
             txt.append("")
             txt.append(f"OVERALL Phase 1 DoD: "
@@ -2429,7 +2472,7 @@ class PSWRWaveriderTab(QWidget):
         self.phase4_label.setText(
             f"Pilot: gen {gen}/{self.ngen_spin.value()}  "
             f"feasible={n_feas}/{pop_size}  best L/D={bestLD:.3f}  "
-            f"sigma={bestSig:+.2f} dBsm  eta_V={bestEta:.4f}")
+            f"sigma={bestSig:+.2f} dBsm  Volumetric Efficiency={bestEta:.4f}")
 
     def _on_pilot_done(self, result):
         self.pareto_result = result
@@ -2507,11 +2550,11 @@ class PSWRWaveriderTab(QWidget):
             txt.append("")
             if result.X.shape[0] > 0:
                 txt.append("Pareto ranges:")
-                txt.append(f"  L/D    : {-result.F[:,0].min():.3f} - "
+                txt.append(f"  L/D                  : {-result.F[:,0].min():.3f} - "
                            f"{-result.F[:,0].max():.3f}")
-                txt.append(f"  sigma_b: {result.F[:,1].min():+.2f} - "
+                txt.append(f"  sigma_b              : {result.F[:,1].min():+.2f} - "
                            f"{result.F[:,1].max():+.2f} dBsm")
-                txt.append(f"  eta_V  : {-result.F[:,2].min():.4f} - "
+                txt.append(f"  Volumetric Efficiency: {-result.F[:,2].min():.4f} - "
                            f"{-result.F[:,2].max():.4f}")
             txt.append("")
             txt.append(f"OVERALL Phase 4 DoD: {'PASS' if overall else 'FAIL'}")
@@ -2620,7 +2663,7 @@ class PSWRWaveriderTab(QWidget):
             txt.append(f"Caret baseline (beta={caret_beta_deg:.0f} deg, "
                        f"Lambda={caret_lambda_deg:.0f} deg):")
             txt.append(f"  L/D = {LD_caret:.3f}, sigma = {sig_caret:+.2f} dBsm, "
-                       f"eta_V = {eta_caret:.4f}")
+                       f"Volumetric Efficiency = {eta_caret:.4f}")
             txt.append("")
             txt.append(f"DoD gate: >=6 dB sigma_b reduction at <=15% L/D loss")
             txt.append(f"  L/D threshold (>=85% of caret): {0.85*LD_caret:.3f}")
@@ -2645,7 +2688,7 @@ class PSWRWaveriderTab(QWidget):
                            f"({100*(-Fb[0]/LD_caret-1):+.1f}% vs caret)")
                 txt.append(f"  sigma = {Fb[1]:+.2f} dBsm  "
                            f"(reduction = {sig_caret-Fb[1]:+.1f} dB)")
-                txt.append(f"  eta_V = {-Fb[2]:.4f}")
+                txt.append(f"  Volumetric Efficiency = {-Fb[2]:.4f}")
             txt.append("")
             txt.append(f"Saved -> {saved_to}")
             txt.append("")
