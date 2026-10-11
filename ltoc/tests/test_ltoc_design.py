@@ -36,14 +36,14 @@ def test_gui_defaults_are_the_configuration_validated_against_r1_tables():
     in ``test_ltoc_published.py``, which reproduce R1 Tables 2 and 3 to 0.5 %."""
     from ltoc.tests.test_ltoc_published import r1_waverider
 
-    d = LTOCDesign.from_preset("R1 waverider case II (Eq. 25), M 7")
+    d = LTOCDesign.from_preset("Shape-changing elliptic shock, Mach 7 (published case II)")
     assert (d.n_stations, d.n_points, d.clustering) == (25, 40, "symmetry")
     wr = r1_waverider("II", n_stations=25, n_points=40)
     assert np.allclose(d.fct(), wr.fct_yz, atol=1e-15)
 
 
 def test_fct_stations_are_clustered_at_the_symmetry_plane():
-    d = LTOCDesign.from_preset("R1 waverider case I (Eq. 23), M 6", n_stations=11)
+    d = LTOCDesign.from_preset("Elliptic cone shock, Mach 6 (published case I)", n_stations=11)
     y = d.fct()[:, 0]
     assert y[0] == 0.0 and y[-1] == pytest.approx(d.shock.tip_y(d.fct_z))
     assert np.all(np.diff(np.diff(y)) > 0)                           # spacing grows outward
@@ -58,7 +58,7 @@ def test_fct_stations_are_clustered_at_the_symmetry_plane():
     (dict(shock=EllipticShock(0.5, 0.1, 0.1, 0.4, 0.3, 0.3)), "non-degenerate"),
 ])
 def test_invalid_inputs_are_rejected_before_solving(change, message):
-    d = LTOCDesign.from_preset("R1 waverider case I (Eq. 23), M 6")
+    d = LTOCDesign.from_preset("Elliptic cone shock, Mach 6 (published case I)")
     for k, v in change.items():
         setattr(d, k, v)
     with pytest.raises(ValueError, match=message):
@@ -78,7 +78,7 @@ def test_refused_stations_are_reported_and_no_geometry_is_built():
 
 
 def test_build_can_be_cancelled_from_the_progress_callback():
-    d = LTOCDesign.from_preset("R1 waverider case II (Eq. 25), M 7", n_stations=9, n_points=20)
+    d = LTOCDesign.from_preset("Shape-changing elliptic shock, Mach 7 (published case II)", n_stations=9, n_points=20)
     with pytest.raises(LTOCError, match="cancelled"):
         d.build(progress=lambda k, n: k < 3)
 
@@ -137,3 +137,101 @@ def test_design_dict_defaults_unknown_keys_and_oc_import():
 def test_malformed_design_dicts_are_rejected(bad, message):
     with pytest.raises(ValueError, match=message):
         LTOCDesign.from_dict(bad)
+
+
+# ---------------------------------------------------------------------------
+#  Shock data files (B-spline input)
+# ---------------------------------------------------------------------------
+
+def test_shock_data_csv_round_trip_with_metadata(tmp_path):
+    from ltoc.design import ShockData
+
+    shock, M, z, _ = PRESETS["Shape-changing elliptic shock, Mach 7 (published case II)"]
+    data = shock.to_data(M_inf=M, fct_z=z)
+    path = tmp_path / "shock.csv"
+    data.write_csv(path)
+    back = ShockData.read_csv(path)
+    assert back == data and back.shape == (61, 41)
+    assert back.meta == {"x_base": 1.5, "M_inf": 7.0, "fct_z": 0.25}
+    assert back.x_range == pytest.approx((0.1, 3.6))
+    # Without a header the columns are u, v, X, Y, Z; extra metadata keys are ignored.
+    rows = [line for line in path.read_text().splitlines() if line and line[0] not in "#u"]
+    plain = tmp_path / "plain.csv"
+    plain.write_text("# a comment\n# other = 3\n" + "\n".join(rows) + "\n")
+    assert ShockData.read_csv(plain) == data and ShockData.read_csv(plain).meta == {}
+
+
+def test_shock_data_reproduces_the_analytic_shock():
+    """R1 case II through a data file (61 x 41 grid, 1.5 chords past the base)
+    gives the analytic result: same FCT tip, same forces."""
+    from ltoc.design import fct_tip_y
+
+    name = "Shape-changing elliptic shock, Mach 7 (published case II)"
+    shock, M, z, _ = PRESETS[name]
+    data = shock.to_data()
+    # The spline through the 61 x 41 samples is the ellipse to interpolation accuracy.
+    assert fct_tip_y(data.surface(), 1.5, z) == pytest.approx(shock.tip_y(z), abs=1e-7)
+    a = LTOCDesign.from_preset(name, n_stations=9, n_points=20).build()
+    b = LTOCDesign(shock_data=data, x_base=1.5, M_inf=M, fct_z=z, n_stations=9, n_points=20).build()
+    assert b.ok and not b.refusals
+    assert b.forces.CL == pytest.approx(a.forces.CL, rel=1e-4)
+    assert b.forces.CD == pytest.approx(a.forces.CD, rel=1e-4)
+    B = b.base_shock()                                               # GUI frame (x, -Z, Y)
+    assert B.shape[0] > 50 and np.allclose(B[:, 0], 1.5, atol=1e-9)
+    assert np.allclose((B[:, 2] / 0.65) ** 2 + (B[:, 1] / 0.8) ** 2, 1.0, atol=1e-5)
+
+
+def test_shock_data_must_extend_past_the_base():
+    shock, M, z, _ = PRESETS["Shape-changing elliptic shock, Mach 7 (published case II)"]
+    short = shock.to_data(n_max=1.0)                                  # data end at the base
+    with pytest.raises(ValueError, match="must lie inside the data"):
+        LTOCDesign(shock_data=short, x_base=1.5, M_inf=M, fct_z=z).build()
+    just = shock.to_data(n_max=1.2)                                   # 0.2 chords past it
+    res = LTOCDesign(shock_data=just, x_base=1.5, M_inf=M, fct_z=z, n_stations=5,
+                     n_points=20).build()
+    assert not res.ok and res.forces is None
+    assert any(st == "undetermined" and "shock data end" in msg for _, st, msg in res.refusals)
+
+
+@pytest.mark.parametrize("text, message", [
+    ("u,v,X,Y\n0,0,0,0\n", "missing z"),
+    ("u,v,X,Y,Z\n0,0,0,0,abc\n", "line 2: expected numbers"),
+    ("u,v,X,Y,Z\n0,0,0,0,0\n0,1,1,0,0\n1,0,0,1,0\n", "full u x v grid"),
+    ("# x_base = one\nu,v,X,Y,Z\n", "line 1: x_base must be a number"),
+    ("u,v,X,Y,Z\n" + "\n".join(f"{i},{j},{j},{i},0" for i in range(3) for j in range(5)), "at least 4"),
+    ("u,v,X,Y,Z\n", "no data rows"),
+])
+def test_invalid_shock_data_files_are_rejected_with_the_reason(tmp_path, text, message):
+    from ltoc.design import ShockData
+
+    path = tmp_path / "bad.csv"
+    path.write_text(text)
+    with pytest.raises(ValueError, match=message):
+        ShockData.read_csv(path)
+
+
+def test_design_dict_embeds_shock_data():
+    import json
+
+    shock, M, z, _ = PRESETS["Elliptic cone shock, Mach 6 (published case I)"]
+    d = LTOCDesign(shock_data=shock.to_data(nu=9, nv=7), x_base=1.7, M_inf=M, fct_z=z)
+    saved = json.loads(json.dumps(d.to_dict()))
+    assert saved["source"] == "bspline" and saved["x_base"] == 1.7
+    back = LTOCDesign.from_dict(saved)
+    assert back.shock_data == d.shock_data and back.x_base == 1.7
+    with pytest.raises(ValueError, match="malformed LTOCs shock data"):
+        LTOCDesign.from_dict(dict(saved, shock_data={"u": [0, 1]}))
+
+
+def test_result_info_panel_values():
+    from ltoc.design import PRESET_ALIASES
+
+    res = LTOCDesign.from_preset("R1 waverider case I (Eq. 23), M 6",          # earlier name
+                                 n_stations=7, n_points=20).build()
+    assert "R1 waverider case I (Eq. 23), M 6" in PRESET_ALIASES
+    info = res.info("LTOCs (test)")
+    assert info["__title__"] == "LTOCs (test)" and info["M_design"] == "6.00"
+    V = float(info["Volume"].split()[0])
+    S = float(info["Planform"].split()[0])
+    assert 0.0 < V and S == pytest.approx(2 * res.forces.area_planform, rel=1e-3)
+    assert float(info["Volumetric Efficiency"]) == pytest.approx(V ** (2 / 3) / S, rel=1e-3)

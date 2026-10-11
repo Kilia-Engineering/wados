@@ -82,6 +82,6 @@ Findings that differ from the papers or the spec are collected in the gate repor
 ## 5. Optional follow-ups (not started)
 
 1. **Project save/load.** WADOS saves only five methods in project files (Gate 0 §1.5); LTOCs is not among them. Adding it means storing `LTOCDesign`, which is a small dataclass. *Done after this gate:* LTOCs is now the sixth method in project files (section `ltoc_waverider`; see the user guide §1).
-2. **More shock inputs in the GUI.** The library also takes `RuledShock` with arbitrary p(m), q(m) and `BSplineShock` (data); the tab offers elliptic ruled shocks and the OC import. A table or CSV input for B-spline shocks would expose the rest.
+2. **More shock inputs in the GUI.** The library also takes `RuledShock` with arbitrary p(m), q(m) and `BSplineShock` (data); the tab offers elliptic ruled shocks and the OC import. A table or CSV input for B-spline shocks would expose the rest. *Done after this gate:* the tab reads shock data from a CSV file (*Shock from a data file (CSV)*, user guide §1.1).
 3. **Second-order Step C** for twisted stream surfaces (Gate 3 §6, deferred by your decision).
 4. **The suggested task** on the OC generator's Taylor–Maccoll tolerances (about 9e−4 L error in that generator; Gate 3).

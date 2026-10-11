@@ -3,7 +3,7 @@
 This page records what was checked, against which reference, at what tolerance, and by which test. It is filled in gate by gate. Figures and the raw numbers come from `python -m ltoc.examples.gate<N>_*`, which write `docs/ltoc/figures/gate<N>_*.png` and `gate<N>_results.json`.
 
 ```
-pytest ltoc/tests/ -q        # 92 passed, ~2 min (the 8 GUI tests need PyQt5 and are skipped in CI)
+pytest ltoc/tests/ -q        # 104 passed, ~2.5 min (the 11 GUI tests need PyQt5 and are skipped in CI)
 ```
 
 All cases use γ = 1.4. Pressure is reported as p/p∞. The meridian-plane frame and nondimensionalisation are those of `ltoc.moc_noncoaxial`.
@@ -245,4 +245,11 @@ Tests are in `ltoc/tests/test_ltoc_design.py` (CI) and `ltoc/tests/test_ltoc_gui
 | Tab: presets fill inputs; editing makes a custom shock; background run fills the views; refusals listed with exports disabled; OC import without a design gives an input error | yes | `test_ltoc_gui.py` (4 tests) |
 | Project files: `LTOCDesign.to_dict`/`from_dict` round trip through JSON for every preset and a custom shock; defaults for missing entries, unknown entries ignored; newer version or malformed shock rejected | yes | `test_design_round_trips_through_json`, `test_design_dict_defaults_unknown_keys_and_oc_import`, `test_malformed_design_dicts_are_rejected` |
 | Project files: tab inputs round trip (preset, custom, OC import); a renamed or edited preset loads as a custom shock; hub "Save/Load Parameters" and the start-up session restore the tab; projects without an LTOCs section leave it unchanged | yes | `test_tab_params_round_trip_presets_custom_and_oc_import`, `test_renamed_or_edited_presets_load_as_custom_shocks`, `test_hub_project_files_save_and_restore_the_ltoc_tab` |
+| Shock data files: CSV round trip exact (17 digits), metadata read, headerless files read | yes | `test_shock_data_csv_round_trip_with_metadata` |
+| Shock data reproduce the analytic shock (R1 case II, 61 x 41 grid): FCT tip to 1e-7, C_L and C_D to 1e-4 relative, base trace on the base ellipse to 1e-5 | yes | `test_shock_data_reproduces_the_analytic_shock` |
+| Shock data must extend past the base: base outside the data rejected; data 0.2 chords past it refused as `undetermined` ("shock data end") | yes | `test_shock_data_must_extend_past_the_base` |
+| Invalid data files rejected with the line and reason (missing column, non-number, incomplete grid, bad metadata, < 4 x 4, empty) | yes | `test_invalid_shock_data_files_are_rejected_with_the_reason` |
+| Project files embed shock data; malformed entries rejected | yes | `test_design_dict_embeds_shock_data` |
+| Information panel values (volume, planform, volumetric efficiency) | consistent with the forces' planform area to 1e-3 | `test_result_info_panel_values`, `test_info_panel_lists_the_waverider_characteristics` |
+| Tab: data-file source loads, solves and round-trips through project files; earlier preset names still load | yes | `test_data_file_source_loads_solves_and_round_trips`, `test_projects_with_earlier_preset_names_still_load` |
 | Aero Analysis mesh dialog offers the LTOCs waverider and returns its STL; unchanged without an LTOCs tab | yes; the STL reads in meshio (PySAGAS) and numpy-stl | `test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider` |

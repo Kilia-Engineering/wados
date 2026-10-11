@@ -44,7 +44,7 @@ def test_presets_fill_the_inputs_and_editing_makes_a_custom_shock(tab):
     from ltoc.design import PRESETS
     from ltoc_waverider_tab import CUSTOM
 
-    name = "R1 waverider case II (Eq. 25), M 7"
+    name = "Shape-changing elliptic shock, Mach 7 (published case II)"
     tab.source_combo.setCurrentText(name)
     shock, M, z, _ = PRESETS[name]
     assert tab.shock_spins["a_q"].value() == pytest.approx(shock.a_q)
@@ -55,7 +55,7 @@ def test_presets_fill_the_inputs_and_editing_makes_a_custom_shock(tab):
 
 
 def test_generate_runs_in_the_background_and_fills_the_views(app, tab, tmp_path):
-    tab.source_combo.setCurrentText("R1 waverider case I (Eq. 23), M 6")
+    tab.source_combo.setCurrentText("Elliptic cone shock, Mach 6 (published case I)")
     tab.stations_spin.setValue(9)
     tab.points_spin.setValue(20)
     _run(app, tab)
@@ -99,7 +99,7 @@ def test_oc_import_without_an_oc_design_gives_an_input_error(tab):
 def test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider(app, tab):
     import waverider_gui as W
 
-    tab.source_combo.setCurrentText("R1 waverider case II (Eq. 25), M 7")
+    tab.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
     tab.stations_spin.setValue(7)
     tab.points_spin.setValue(20)
     _run(app, tab)
@@ -123,7 +123,7 @@ def test_aero_analysis_mesh_dialog_offers_the_ltoc_waverider(app, tab):
 def test_tab_params_round_trip_presets_custom_and_oc_import(tab):
     from ltoc_waverider_tab import CUSTOM, OC_IMPORT
 
-    tab.source_combo.setCurrentText("Circular cone, beta 12 deg, M 6")   # values rounded in the widgets
+    tab.source_combo.setCurrentText("Circular cone shock 12°, Mach 6")   # values rounded in the widgets
     tab.stations_spin.setValue(31)
     tab.points_spin.setValue(55)
     tab.cluster_combo.setCurrentIndex(1)
@@ -131,11 +131,11 @@ def test_tab_params_round_trip_presets_custom_and_oc_import(tab):
     tab.source_combo.setCurrentIndex(0)
     tab.stations_spin.setValue(9)
     tab.set_params_dict(saved)
-    assert tab.source_combo.currentText() == "Circular cone, beta 12 deg, M 6"
+    assert tab.source_combo.currentText() == "Circular cone shock 12°, Mach 6"
     assert (tab.stations_spin.value(), tab.points_spin.value(), tab.cluster_combo.currentIndex()) == (31, 55, 1)
     assert tab.get_params_dict() == saved
 
-    tab.source_combo.setCurrentText("R1 waverider case I (Eq. 23), M 6")
+    tab.source_combo.setCurrentText("Elliptic cone shock, Mach 6 (published case I)")
     tab.shock_spins["a_q"].setValue(0.61)                                # becomes custom
     saved = tab.get_params_dict()
     assert saved["source"] == "custom"
@@ -154,7 +154,7 @@ def test_tab_params_round_trip_presets_custom_and_oc_import(tab):
 def test_renamed_or_edited_presets_load_as_custom_shocks(tab):
     from ltoc_waverider_tab import CUSTOM
 
-    tab.source_combo.setCurrentText("R1 waverider case II (Eq. 25), M 7")
+    tab.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
     saved = tab.get_params_dict()
     renamed = dict(saved, source="R1 case II (old name)")
     tab.source_combo.setCurrentIndex(0)
@@ -175,18 +175,18 @@ def test_hub_project_files_save_and_restore_the_ltoc_tab(app, tmp_path, monkeypa
     monkeypatch.setattr(W.WaveriderGUI, "_params_file_path", lambda self: str(session))
     hub = W.WaveriderGUI()
     t = hub.ltoc_waverider_tab
-    t.source_combo.setCurrentText("R1 waverider case II (Eq. 25), M 7")
+    t.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
     t.stations_spin.setValue(33)
     project = tmp_path / "project.json"
     hub._write_params_to_file(str(project))
     data = json.loads(project.read_text())
-    assert data["ltoc_waverider"]["source"] == "R1 waverider case II (Eq. 25), M 7"
+    assert data["ltoc_waverider"]["source"] == "Shape-changing elliptic shock, Mach 7 (published case II)"
     assert data["ltoc_waverider"]["n_stations"] == 33 and "oc_waverider" in data
 
     t.source_combo.setCurrentIndex(0)
     t.stations_spin.setValue(9)
     hub._read_params_from_file(str(project))
-    assert t.source_combo.currentText() == "R1 waverider case II (Eq. 25), M 7"
+    assert t.source_combo.currentText() == "Shape-changing elliptic shock, Mach 7 (published case II)"
     assert t.stations_spin.value() == 33
 
     # A project saved before LTOCs existed leaves the tab as it is.
@@ -201,4 +201,61 @@ def test_hub_project_files_save_and_restore_the_ltoc_tab(app, tmp_path, monkeypa
     hub._auto_save_params()
     hub2 = W.WaveriderGUI()
     assert hub2.ltoc_waverider_tab.stations_spin.value() == 11
-    assert hub2.ltoc_waverider_tab.source_combo.currentText() == "R1 waverider case II (Eq. 25), M 7"
+    assert hub2.ltoc_waverider_tab.source_combo.currentText() == "Shape-changing elliptic shock, Mach 7 (published case II)"
+
+
+def test_data_file_source_loads_solves_and_round_trips(app, tab, tmp_path):
+    from ltoc_waverider_tab import BSPLINE
+
+    tab.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
+    path = tmp_path / "case2.csv"
+    tab.save_shock_file(path)
+    tab.source_combo.setCurrentIndex(0)
+    tab.load_shock_file(path)
+    assert tab.source_combo.currentText() == BSPLINE
+    assert tab.data_box.isVisible() and not tab.elliptic_box.isVisible()
+    assert (tab.xbase_spin.value(), tab.mach_spin.value(), tab.fct_spin.value()) == (1.5, 7.0, 0.25)
+    assert "61 x 41 grid" in tab.data_label.text()
+    tab.stations_spin.setValue(7)
+    tab.points_spin.setValue(20)
+    _run(app, tab)
+    assert tab.waverider is not None and "7/7 stations solved" in tab.output_label.text()
+    saved = tab.get_params_dict()
+    assert saved["source"] == "bspline" and len(saved["shock_data"]["u"]) == 61
+    tab.source_combo.setCurrentIndex(0)
+    tab._set_shock_data(None)
+    tab.set_params_dict(saved)
+    assert tab.source_combo.currentText() == BSPLINE and tab.shock_data is not None
+    # Without data, 'Generate' reports an input error instead of solving.
+    tab._set_shock_data(None)
+    tab.generate()
+    assert "load a CSV file first" in tab.output_label.text()
+    bad = tmp_path / "bad.csv"
+    bad.write_text("u,v,X,Y,Z\n0,0,0,0,x\n")
+    with pytest.raises(ValueError, match="line 2"):
+        tab.load_shock_file(bad)
+    tab.source_combo.setCurrentIndex(0)
+
+
+def test_projects_with_earlier_preset_names_still_load(tab):
+    """Preset names were made plain-language; projects saved with the earlier
+    names ("R1 waverider case II (Eq. 25), M 7") still select the preset."""
+    tab.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
+    saved = dict(tab.get_params_dict(), source="R1 waverider case II (Eq. 25), M 7")
+    tab.source_combo.setCurrentIndex(0)
+    tab.set_params_dict(saved)
+    assert tab.source_combo.currentText() == "Shape-changing elliptic shock, Mach 7 (published case II)"
+    tab.source_combo.setCurrentIndex(0)
+
+
+def test_info_panel_lists_the_waverider_characteristics(app, tab):
+    tab.source_combo.setCurrentText("Elliptic cone shock, Mach 6 (published case I)")
+    tab.stations_spin.setValue(7)
+    tab.points_spin.setValue(20)
+    _run(app, tab)
+    text = tab.canvas_3d._info_text.get_text()
+    assert text.startswith("LTOCs (Elliptic cone shock, Mach 6)")
+    for key in ("M_design", "Length", "Span", "Height", "Volume", "Planform", "Volumetric Efficiency", "CL", "L/D"):
+        assert key in text
+    tab.canvas_3d.placeholder()
+    assert tab.canvas_3d._info_text is None
