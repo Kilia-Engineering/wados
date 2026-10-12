@@ -406,8 +406,14 @@ def _build_mfof(p: dict) -> Geometry:
 # ---------------------------------------------------------------------------
 
 def pysagas_coefficients(mesh, *, mach: float, pressure: float, temperature: float,
-                         aoa: float, A_ref: float, c_ref: float):
-    """PySAGAS (oblique shock / Prandtl-Meyer) C_L, C_D, C_m of a triangle mesh."""
+                         aoa: float, A_ref: float, c_ref: float, corrections=None) -> dict:
+    """PySAGAS (oblique shock / Prandtl-Meyer) C_L, C_D, C_m of a triangle mesh.
+
+    ``corrections`` (an ``aero_corrections.AeroCorrections`` or its dict) sets
+    the base pressure and skin friction; None is PySAGAS as is. Returns
+    ``aero_corrections.corrected_coefficients``'s dict.
+    """
+    from aero_corrections import INVISCID, AeroCorrections, corrected_coefficients
     from pysagas.cfd import OPM
     from pysagas.flow import FlowState
     from pysagas.geometry import Cell, Vector
@@ -421,8 +427,9 @@ def pysagas_coefficients(mesh, *, mach: float, pressure: float, temperature: flo
     try:
         solver = OPM(cells, FlowState(mach=mach, pressure=pressure, temperature=temperature))
         solver.solve(aoa=aoa)
-        CL, CD, Cm = solver.flow_result.coefficients(A_ref=A_ref, c_ref=c_ref)
-        return float(CL), float(CD), float(Cm)
+        if isinstance(corrections, dict):
+            corrections = AeroCorrections.from_dict(corrections)
+        return corrected_coefficients(solver, A_ref, c_ref, corrections or INVISCID)
     finally:
         os.chdir(cwd)
         shutil.rmtree(work, ignore_errors=True)
@@ -431,9 +438,11 @@ def pysagas_coefficients(mesh, *, mach: float, pressure: float, temperature: flo
 def evaluate_design(method: str, params: dict, flow: dict) -> dict:
     """Build and analyse one design.
 
-    ``flow``: mach, pressure (Pa), temperature (K), aoa (deg). Returns
-    ``success`` with CL, CD, Cm, Volume, planform_area, VolEff and time, or
-    ``success: False`` with ``error``.
+    ``flow``: mach, pressure (Pa), temperature (K), aoa (deg) and optionally
+    corrections (an ``AeroCorrections`` dict for the base pressure and skin
+    friction; PySAGAS as is if absent). Returns ``success`` with CL, CD, Cm (corrected),
+    CD_inviscid, CD_base, CD_friction, Volume, planform_area, VolEff and time,
+    or ``success: False`` with ``error``.
     """
     from geometry_export import mesh_planform_area, mesh_volume
 
@@ -447,15 +456,17 @@ def evaluate_design(method: str, params: dict, flow: dict) -> dict:
     except Exception as e:
         return {"success": False, "error": f"Geometry failed: {e}", "time": time.time() - t0}
     try:
-        CL, CD, Cm = pysagas_coefficients(
+        aero = pysagas_coefficients(
             geom.mesh, mach=flow["mach"], pressure=flow["pressure"],
             temperature=flow["temperature"], aoa=flow.get("aoa", 0.0),
-            A_ref=planform, c_ref=geom.length)
+            A_ref=planform, c_ref=geom.length, corrections=flow.get("corrections"))
+        CL, CD, Cm = aero["CL"], aero["CD"], aero["Cm"]
     except Exception as e:
         return {"success": False, "error": f"PySAGAS analysis failed: {e}", "time": time.time() - t0}
     if not all(np.isfinite([CL, CD, Cm])):
         return {"success": False, "error": "PySAGAS returned NaN/Inf", "time": time.time() - t0}
-    return {"success": True, "CL": CL, "CD": CD, "Cm": Cm, "Volume": volume,
+    return {"success": True, "CL": CL, "CD": CD, "Cm": Cm, "CD_inviscid": aero["CD_inviscid"],
+            "CD_base": aero["CD_base"], "CD_friction": aero["CD_friction"], "Volume": volume,
             "planform_area": planform, "VolEff": volume ** (2.0 / 3.0) / planform,
             "length": geom.length, "time": time.time() - t0}
 

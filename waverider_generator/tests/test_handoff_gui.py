@@ -202,6 +202,9 @@ def test_short_optimization_run_and_apply(hub, tmp_path, monkeypatch):
     hub._app.processEvents()
     log = opt.console.toPlainText()
     assert "OPTIMIZATION COMPLETE" in log and "Starting design: CL/CD=" in log
+    # the recommended base pressure and skin friction are on by default
+    assert "Base pressure: Igra 2018 correlation; skin friction: turbulent" in log
+    assert " friction" in log.split("Starting design: CL/CD=")[1].splitlines()[1]
     folder = opt.last_results_folder
     import pandas as pd
 
@@ -217,3 +220,40 @@ def test_short_optimization_run_and_apply(hub, tmp_path, monkeypatch):
     p = tab.optimization_case().params()
     assert p["theta_d_deg"] == pytest.approx(best["theta_d_deg"], abs=0.01)
     assert hub.tab_widget.currentWidget() is tab
+
+
+def test_aero_analysis_applies_the_corrections(hub, tmp_path, monkeypatch):
+    """The Aero Analysis worker applies the tab's base-pressure and friction
+    settings (the recommended ones by default) on top of PySAGAS."""
+    import waverider_gui as W
+    from aero_corrections import INVISCID, AeroCorrections
+
+    monkeypatch.chdir(tmp_path)                          # the worker writes its VTK file here
+    tab = _generate(hub, "gvwd_waverider_tab")
+    hub.send_to_aero_analysis(tab)
+    assert hub.aero_corrections_group.corrections() == AeroCorrections()
+    assert hub.import_corrections_group.corrections() == AeroCorrections()
+    flow = {"mach": 6.0, "pressure": 2549.0, "temperature": 221.55}
+
+    def run(corrections):
+        out = []
+        worker = W.AnalysisWorker(hub.last_stl_file, flow, 0.0, hub.aref_spin.value(),
+                                  corrections=corrections)
+        worker.finished.connect(out.append)
+        worker.error.connect(out.append)
+        worker.run()                                     # in this thread
+        assert isinstance(out[0], dict), out[0]
+        return out[0]
+
+    raw, corr = run(INVISCID), run(hub.aero_corrections_group.corrections())
+    assert raw["CD_base"] == raw["CD_friction"] == 0.0
+    assert corr["CD_inviscid"] == pytest.approx(raw["CD"], rel=1e-12)
+    assert corr["CD_base"] < 0.0 < corr["CD_friction"]
+    assert corr["CL/CD"] == pytest.approx(corr["CL"] / corr["CD"])
+    text = W._drag_breakdown_text(corr)
+    assert "Skin friction" in text and "Igra 2018" in text
+
+    hub.aero_corrections_group.set_corrections(AeroCorrections("freestream", "off"))
+    assert hub.aero_corrections_group.corrections() == AeroCorrections("freestream", "off")
+    assert not hub.aero_corrections_group.wall_spin.isEnabled()
+    hub.aero_corrections_group.set_corrections(AeroCorrections())

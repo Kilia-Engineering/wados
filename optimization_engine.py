@@ -108,6 +108,10 @@ class WaveriderProblem(Problem):
                  
                  # Design variable ranges [(lo, hi)] * 4; default [0, 1] each
                  bounds: Optional[List[Tuple[float, float]]] = None,
+
+                 # Base pressure and skin friction (aero_corrections.AeroCorrections
+                 # dict); None is PySAGAS as is
+                 corrections: Optional[Dict] = None,
                  
                  # Debug
                  verbose: bool = False):
@@ -145,6 +149,7 @@ class WaveriderProblem(Problem):
         
         # Store mesh parameters
         self.mesh_size = mesh_size
+        self.corrections = corrections
         
         # Store waverider generation parameters
         self.n_planes = n_planes
@@ -475,7 +480,8 @@ class WaveriderProblem(Problem):
                     self.M_inf, self.beta, self.pressure, self.temperature, self.aoa,
                     self.height, self.width, self.A_ref,
                     self.mesh_size, self.n_planes, self.n_streamwise, self.delta_streamwise,
-                    worker_id=i, verbose=self.verbose, match_shockwave=self.match_shockwave
+                    worker_id=i, verbose=self.verbose, match_shockwave=self.match_shockwave,
+                    corrections=self.corrections
                 )
                 if self.verbose:
                     if result['success']:
@@ -506,7 +512,8 @@ class WaveriderProblem(Problem):
                     self.mesh_size, self.n_planes, self.n_streamwise, self.delta_streamwise,
                     i,  # worker_id
                     False,  # verbose
-                    self.match_shockwave  # match_shockwave
+                    self.match_shockwave,  # match_shockwave
+                    self.corrections
                 ))
         
         # Evaluate in parallel using spawn context (Windows-safe)
@@ -573,7 +580,8 @@ def evaluate_single_design(
     delta_streamwise: float,
     worker_id: int = 0,
     verbose: bool = False,
-    match_shockwave: bool = False
+    match_shockwave: bool = False,
+    corrections: Optional[Dict] = None
 ) -> Dict:
     """
     Evaluate a single waverider design.
@@ -694,10 +702,11 @@ def evaluate_single_design(
         try:
             # Use waverider streamwise length as reference length for moment coefficients
             c_ref_calc = getattr(wr, 'length', 1.0)
-            CL, CD, Cm = run_pysagas_analysis(
+            aero = run_pysagas_analysis(
                 stl_file, M_inf, pressure, temperature, aoa, A_ref_calc, temp_dir,
-                c_ref=c_ref_calc
+                c_ref=c_ref_calc, corrections=corrections, details=True
             )
+            CL, CD, Cm = aero['CL'], aero['CD'], aero['Cm']
         except Exception as e:
             return {
                 'success': False,
@@ -716,6 +725,9 @@ def evaluate_single_design(
             'CL': CL,
             'CD': CD,
             'Cm': Cm,
+            'CD_inviscid': aero['CD_inviscid'],
+            'CD_base': aero['CD_base'],
+            'CD_friction': aero['CD_friction'],
             'Volume': volume,
             'planform_area': A_ref_calc,
             'time': eval_time
@@ -905,8 +917,10 @@ def run_pysagas_analysis(
     aoa: float,
     A_ref: float,
     work_dir: str,
-    c_ref: float = None
-) -> Tuple[float, float, float]:
+    c_ref: float = None,
+    corrections=None,
+    details: bool = False
+):
     """
     Run PySAGAS aerodynamic analysis.
     
@@ -929,6 +943,11 @@ def run_pysagas_analysis(
     c_ref : float, optional
         Reference length (m) for moment coefficient non-dimensionalization.
         If None, defaults to 1.0.
+    corrections : aero_corrections.AeroCorrections or dict, optional
+        Base pressure and skin friction. None is PySAGAS as is.
+    details : bool
+        Return aero_corrections.corrected_coefficients's dict (CL, CD, Cm,
+        CD_inviscid, CD_base, CD_friction, ...) instead of (CL, CD, Cm).
 
     Returns
     -------
@@ -998,11 +1017,16 @@ def run_pysagas_analysis(
         # Run solver at specified AoA
         result = solver.solve(aoa=aoa)
         
-        # Get aerodynamic coefficients from flow_result with proper reference values
+        # Aerodynamic coefficients with proper reference values and the
+        # base-pressure and friction corrections
+        from aero_corrections import INVISCID, AeroCorrections, corrected_coefficients
         _c_ref = c_ref if c_ref is not None else 1.0
-        CL, CD, Cm = solver.flow_result.coefficients(A_ref=A_ref, c_ref=_c_ref)
-        
-        return CL, CD, Cm
+        if isinstance(corrections, dict):
+            corrections = AeroCorrections.from_dict(corrections)
+        aero = corrected_coefficients(solver, A_ref, _c_ref, corrections or INVISCID)
+        if details:
+            return aero
+        return aero['CL'], aero['CD'], aero['Cm']
         
     finally:
         os.chdir(original_dir)

@@ -857,19 +857,31 @@ class GmshWorker(QThread):
             sys.stdout.flush()
 
 
+def _drag_breakdown_text(results):
+    """Drag breakdown lines for an AnalysisWorker result (aero_corrections)."""
+    if 'CD_inviscid' not in results:
+        return ""
+    return (f"Drag breakdown:\n"
+            f"  Inviscid (PySAGAS, base at vacuum): {results['CD_inviscid']:.6f}\n"
+            f"  Base pressure correction:           {results['CD_base']:+.6f}\n"
+            f"  Skin friction:                      {results['CD_friction']:.6f}\n"
+            f"  ({results['corrections']})\n\n")
+
+
 class AnalysisWorker(QThread):
     """Worker thread for PySAGAS analysis (keeps GUI responsive)"""
     finished = pyqtSignal(dict)  # Emits results
     error = pyqtSignal(str)  # Emits error message
     progress = pyqtSignal(str)  # Emits progress updates
 
-    def __init__(self, stl_file, freestream_dict, aoa, A_ref, vtk_path=None):
+    def __init__(self, stl_file, freestream_dict, aoa, A_ref, vtk_path=None, corrections=None):
         super().__init__()
         self.stl_file = stl_file
         self.freestream_dict = freestream_dict
         self.aoa = aoa
         self.A_ref = A_ref
         self.vtk_path = vtk_path
+        self.corrections = corrections      # aero_corrections.AeroCorrections; None: PySAGAS as is
         
     def run(self):
         import io
@@ -949,25 +961,26 @@ class AnalysisWorker(QThread):
             print(msg)
             sys.stdout.flush()
             
-            # Get aero coefficients with user-specified A_ref
-            CL, CD, Cm = solver.flow_result.coefficients(A_ref=self.A_ref)
+            # Get aero coefficients with user-specified A_ref, with the base
+            # pressure and skin friction corrections
+            from aero_corrections import INVISCID, corrected_coefficients
+            aero = corrected_coefficients(solver, self.A_ref, 1.0, self.corrections or INVISCID)
+            CL, CD, Cm = aero['CL'], aero['CD'], aero['Cm']
 
             print(f"\n  Coefficients from PySAGAS:")
             print(f"    CL = {CL:.6f}")
-            print(f"    CD = {CD:.6f}")
+            print(f"    CD = {CD:.6f}  (inviscid {aero['CD_inviscid']:.6f}, "
+                  f"base {aero['CD_base']:+.6f}, friction {aero['CD_friction']:.6f})")
             print(f"    Cm = {Cm:.6f}")
             print(f"  Reference area used: {self.A_ref:.4f} m\u00b2")
+            print(f"  {aero['corrections']}")
             sys.stdout.flush()
             
             # Calculate L/D
             LD = CL / CD if CD != 0 else float('inf')
             
-            results = {
-                'CL': float(CL),
-                'CD': float(CD),
-                'Cm': float(Cm),
-                'CL/CD': float(LD)
-            }
+            results = dict(aero)
+            results['CL/CD'] = float(LD)
             
             msg = "Analysis complete!"
             self.progress.emit(msg)
@@ -2134,7 +2147,8 @@ class WaveriderGUI(QMainWindow):
         QApplication.processEvents()
 
         self.import_analysis_worker = AnalysisWorker(
-            self.imported_stl_path, freestream_dict, aoa, a_ref
+            self.imported_stl_path, freestream_dict, aoa, a_ref,
+            corrections=self.import_corrections_group.corrections()
         )
         self.import_analysis_worker.finished.connect(self._on_import_analysis_done)
         self.import_analysis_worker.error.connect(self._on_import_analysis_error)
@@ -2162,7 +2176,8 @@ class WaveriderGUI(QMainWindow):
             f"  CL:             {CL:.6f}\n"
             f"  CD:             {CD:.6f}\n"
             f"  Cm:             {Cm:.6f}\n"
-            f"  L/D:            {LD:.4f}\n"
+            f"  L/D:            {LD:.4f}\n\n"
+            + _drag_breakdown_text(results)
         )
 
         QMessageBox.information(self, "Analysis Results", text)
@@ -3029,10 +3044,14 @@ class WaveriderGUI(QMainWindow):
         self.import_aref_spin.setSingleStep(0.01)
         analysis_layout.addWidget(self.import_aref_spin, 4, 1)
 
+        from aero_corrections_panel import AeroCorrectionsGroup
+        self.import_corrections_group = AeroCorrectionsGroup()
+        analysis_layout.addWidget(self.import_corrections_group, 5, 0, 1, 2)
+
         self.import_analyze_btn = QPushButton("Run PySAGAS")
         self.import_analyze_btn.setEnabled(False)
         self.import_analyze_btn.clicked.connect(self._import_run_analysis)
-        analysis_layout.addWidget(self.import_analyze_btn, 5, 0, 1, 2)
+        analysis_layout.addWidget(self.import_analyze_btn, 6, 0, 1, 2)
         analysis_group.setLayout(analysis_layout)
         ctrl_layout.addWidget(analysis_group)
 
@@ -3165,6 +3184,11 @@ class WaveriderGUI(QMainWindow):
 
         params_group.setLayout(params_layout)
         left_layout.addWidget(params_group)
+
+        # Base pressure and skin friction (aero_corrections)
+        from aero_corrections_panel import AeroCorrectionsGroup
+        self.aero_corrections_group = AeroCorrectionsGroup()
+        left_layout.addWidget(self.aero_corrections_group)
 
         # STL Mesh Generation Group
         self.mesh_gen_group = QGroupBox("STL Mesh Generation (Gmsh)")
@@ -4842,7 +4866,8 @@ class WaveriderGUI(QMainWindow):
             freestream_dict,
             aoa,
             A_ref,
-            vtk_path=self.last_vtk_file
+            vtk_path=self.last_vtk_file,
+            corrections=self.aero_corrections_group.corrections()
         )
         self.analysis_worker.finished.connect(self.on_analysis_finished)
         self.analysis_worker.error.connect(self.on_analysis_error)
@@ -4880,6 +4905,7 @@ class WaveriderGUI(QMainWindow):
         result_text += f"  CD (Drag):       {results['CD']:.6f}\n"
         result_text += f"  Cm (Moment):     {results['Cm']:.6f}\n"
         result_text += f"  CL/CD Ratio:       {results['CL/CD']:.3f}\n\n"
+        result_text += _drag_breakdown_text(results)
 
         result_text += "="*60 + "\n"
         result_text += "Analysis complete! ✓\n"
@@ -5084,6 +5110,8 @@ class WaveriderGUI(QMainWindow):
         self.results_text.append(f"Pressure: {pressure:.0f} Pa")
         self.results_text.append(f"Temperature: {temperature:.2f} K")
         self.results_text.append(f"A_ref: {A_ref:.4f} m²")
+        corrections = self.aero_corrections_group.corrections()
+        self.results_text.append(corrections.describe())
         self.results_text.append(f"\nRunning {n_points} analysis points...\n")
         QApplication.processEvents()
 
@@ -5113,6 +5141,8 @@ class WaveriderGUI(QMainWindow):
             sweep_CD = []
             sweep_Cm = []
             sweep_CL_CD = []
+            sweep_CD_parts = {'CD_inviscid': [], 'CD_base': [], 'CD_friction': []}
+            from aero_corrections import corrected_coefficients
 
             point_count = 0
             for aoa in aoa_list:
@@ -5133,11 +5163,14 @@ class WaveriderGUI(QMainWindow):
                         )
 
                         # Run flow solver
-                        aero = flow_solver.solve(freestream=freestream)
+                        flow_solver.solve(freestream=freestream)
 
-                        # Extract coefficients with correct A_ref
-                        CL, CD, Cm = aero.coefficients(A_ref=A_ref)
+                        # Coefficients with correct A_ref, base pressure and skin friction
+                        aero = corrected_coefficients(flow_solver, A_ref, 1.0, corrections)
+                        CL, CD, Cm = aero['CL'], aero['CD'], aero['Cm']
                         CL_CD = CL / CD if abs(CD) > 1e-10 else 0.0
+                        for key, values in sweep_CD_parts.items():
+                            values.append(aero[key])
 
                         sweep_aoa.append(aoa)
                         sweep_mach.append(mach)
@@ -5161,6 +5194,8 @@ class WaveriderGUI(QMainWindow):
                 'CD': sweep_CD,
                 'Cm': sweep_Cm,
                 'CL_CD': sweep_CL_CD,
+                **sweep_CD_parts,
+                'corrections': corrections.describe(),
                 'pressure': pressure,
                 'temperature': temperature,
                 'A_ref': A_ref
@@ -5210,7 +5245,9 @@ class WaveriderGUI(QMainWindow):
             import csv
             with open(filename, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['AoA_deg', 'Mach', 'CL', 'CD', 'Cm', 'CL_CD'])
+                parts = [k for k in ('CD_inviscid', 'CD_base', 'CD_friction')
+                         if len(self.aerodeck_results.get(k, [])) == len(self.aerodeck_results['aoa'])]
+                writer.writerow(['AoA_deg', 'Mach', 'CL', 'CD', 'Cm', 'CL_CD'] + parts)
                 
                 for i in range(len(self.aerodeck_results['aoa'])):
                     writer.writerow([
@@ -5220,7 +5257,7 @@ class WaveriderGUI(QMainWindow):
                         self.aerodeck_results['CD'][i],
                         self.aerodeck_results['Cm'][i],
                         self.aerodeck_results['CL_CD'][i]
-                    ])
+                    ] + [self.aerodeck_results[k][i] for k in parts])
             
             self.results_text.append(f"\n📁 Results saved to: {filename}")
             
