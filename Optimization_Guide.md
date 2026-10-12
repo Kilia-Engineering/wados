@@ -161,6 +161,35 @@ C_L >= 1 default made every design infeasible.
 | **CPU Cores** | Parallel evaluation threads | Number of physical cores |
 | **Mesh Size** | Gmsh element size | 0.2 (coarser = faster) |
 
+### Base Pressure and Skin Friction
+
+PySAGAS is inviscid and sets the base to vacuum (p = 0). The
+*Base Pressure and Skin Friction* group corrects both, for the OC Waverider
+and for every design sent from another tab. The Aero Analysis tab has the
+same group.
+
+| Setting | Options | Default |
+|---------|---------|---------|
+| **Base pressure** | Igra 2018 correlation; vacuum (PySAGAS as is); p∞/M∞; freestream p∞ | Igra 2018 correlation |
+| **Skin friction** | Turbulent; laminar; transition at Re_x; off (inviscid) | Turbulent |
+| **Transition Re_x** | Reynolds number at transition (transition only) | 1×10⁶ |
+| **Wall temperature T_w** | Eckert reference temperature | 1000 K |
+
+- **Base pressure.** The correlation is Igra 2018, Eq. (6) (from Guidi et
+  al. 2003): about 0.25 p∞ at Mach 5 and 0.11 p∞ at Mach 14. Vacuum
+  overpredicts the base drag; freestream ignores it. For the OC tab's
+  default design at Mach 5, inviscid L/D is 4.9 with vacuum, 5.6 with the
+  correlation and 10.2 with freestream.
+- **Skin friction.** Flat-plate friction on every face except the base, at
+  the face's PySAGAS edge state. The distance is measured from the nose; the
+  mesh must be in metres. Waveriders fly at Re_L of 1e7–1e8, so turbulent is
+  the default. On the same design, turbulent friction lowers L/D from 5.6 to
+  4.4.
+- **What's logged.** The log shows the settings. The starting design's drag
+  is split into inviscid, base and friction parts.
+- **Old configurations.** Configurations saved before this setting existed
+  load with vacuum base and no friction, as they ran.
+
 ### Tips
 
 - **Start with 2 objectives**: e.g., CL/CD + Volume. More objectives require exponentially larger populations.

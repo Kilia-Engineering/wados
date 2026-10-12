@@ -37,6 +37,13 @@ METHOD_SECONDS = {"ltoc": 10, "gvwd": 1, "pswr": 2, "planar": 4, "shadow": 2,
                   "hybrid": 3, "vmn": 3, "vmof": 4, "vmplo": 4, "mfof": 5}
 
 
+def _corrections_text(corrections) -> str:
+    """Log line for the base-pressure and friction settings (aero_corrections)."""
+    from aero_corrections import INVISCID, AeroCorrections
+    c = AeroCorrections.from_dict(corrections) if corrections else INVISCID
+    return c.describe()
+
+
 class OptimizationWorker(QThread):
     """Worker thread for running optimization in background"""
     
@@ -109,10 +116,12 @@ class OptimizationWorker(QThread):
                 flow = {'mach': fixed_params['M_inf'],
                         'pressure': sim_params.get('pressure', 2549.0),
                         'temperature': sim_params.get('temperature', 221.55),
-                        'aoa': sim_params.get('aoa', 0.0)}
+                        'aoa': sim_params.get('aoa', 0.0),
+                        'corrections': sim_params.get('corrections')}
                 self.log_message.emit(f"   Method: {method_case.title}")
                 self.log_message.emit(f"   Flight: M∞={flow['mach']:g}, α={flow['aoa']}°, "
                                       f"P∞={flow['pressure']:.1f} Pa, T∞={flow['temperature']:.2f} K")
+                self.log_message.emit(f"   {_corrections_text(flow['corrections'])}")
                 for v in method_case.active():
                     self.log_message.emit(f"   {v.label}: {v.lower:g} to {v.upper:g} (now {v.value:g})")
                 problem = MethodProblem(method_case, objectives, constraints, flow=flow,
@@ -125,6 +134,9 @@ class OptimizationWorker(QThread):
                         f"   Starting design: CL/CD={base['CL'] / base['CD']:.3f}, "
                         f"CL={base['CL']:.4f}, CD={base['CD']:.5f}, Volume={base['Volume']:.4g} m³, "
                         f"Volumetric Efficiency={base['VolEff']:.4f} ({base['time']:.1f} s)")
+                    self.log_message.emit(
+                        f"   CD = {base['CD_inviscid']:.5f} inviscid {base['CD_base']:+.5f} base "
+                        f"+ {base['CD_friction']:.5f} friction")
                 else:
                     self.log_message.emit(f"   ⚠ Starting design failed: {base['error']}")
                 self.log_message.emit("")
@@ -132,6 +144,7 @@ class OptimizationWorker(QThread):
                 self.log_message.emit(f"   M_inf={fixed_params['M_inf']}, β={fixed_params['beta']}°")
                 self.log_message.emit(f"   height={fixed_params['height']}m, width={fixed_params['width']}m")
                 self.log_message.emit(f"   α={sim_params.get('aoa', 0.0)}°, P∞={sim_params.get('pressure', 2549.0):.1f} Pa, T∞={sim_params.get('temperature', 221.55):.2f} K")
+                self.log_message.emit(f"   {_corrections_text(sim_params.get('corrections'))}")
                 self.log_message.emit(f"   mesh_size={algorithm_params.get('mesh_size', 0.1)}")
                 problem = WaveriderProblem(
                     objectives=objectives,
@@ -147,6 +160,7 @@ class OptimizationWorker(QThread):
                     mesh_size=algorithm_params.get('mesh_size', 0.1),
                     n_cores=algorithm_params['n_cores'],
                     match_shockwave=sim_params.get('match_shockwave', False),
+                    corrections=sim_params.get('corrections'),
                     bounds=[(v['min'], v['max']) for v in design_vars] if len(design_vars) == 4 else None,
                     verbose=True  # Enable verbose mode to see errors
                 )
@@ -488,6 +502,9 @@ class OptimizationTab(QWidget):
         left_layout.addWidget(self.create_objectives_group())
         left_layout.addWidget(self.create_constraints_group())
         left_layout.addWidget(self.create_simulation_params_group())
+        from aero_corrections_panel import AeroCorrectionsGroup
+        self.opt_corrections_group = AeroCorrectionsGroup()
+        left_layout.addWidget(self.opt_corrections_group)
         left_layout.addWidget(self.create_algorithm_settings_group())
         left_layout.addWidget(self.create_run_controls_group())
         left_layout.addStretch()
@@ -1665,7 +1682,8 @@ class OptimizationTab(QWidget):
             'A_ref': self.opt_aref_spin.value(),
             'pressure': self.opt_pressure_spin.value(),
             'temperature': self.opt_temperature_spin.value(),
-            'match_shockwave': self.opt_match_shock_check.isChecked()
+            'match_shockwave': self.opt_match_shock_check.isChecked(),
+            'corrections': self.opt_corrections_group.corrections().to_dict()
         }
         
         # Fixed parameters (geometry + flow)
@@ -2010,7 +2028,14 @@ class OptimizationTab(QWidget):
                     self.mesh_quality_combo.setCurrentText('Medium')
                 else:
                     self.mesh_quality_combo.setCurrentText('Fine (slow)')
-                
+
+                # Base pressure and skin friction; configurations saved before
+                # these settings existed ran PySAGAS as is
+                from aero_corrections import INVISCID, AeroCorrections
+                corrections = config.get('simulation_params', {}).get('corrections')
+                self.opt_corrections_group.set_corrections(
+                    AeroCorrections.from_dict(corrections) if corrections else INVISCID)
+
                 self.log_message(f"✓ Configuration loaded: {filename}")
                 QMessageBox.information(self, "Success",
                                       f"Configuration loaded from:\n{filename}")

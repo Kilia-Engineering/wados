@@ -29,6 +29,7 @@ from pswr.aero.viscous import (   # reuse PSWR-1 primitives (audited & tested)
 
 _R_AIR = 287.05
 _GAMMA = 1.4
+_BASE_TURN_DEG = 20.0      # faces turned further from the flow are base (no friction)
 
 
 @dataclass
@@ -37,7 +38,7 @@ class ViscousResult:
     F_friction_over_q: float
     delta_BL_max: float
     Re_chord_max: float
-    Cf_panel: np.ndarray            # per-windward-panel chord-averaged Cf
+    Cf_panel: np.ndarray            # per-panel Cf (only wetted panels carry friction)
     state_per_panel: dict
     S_ref: float
 
@@ -58,13 +59,18 @@ def panel_viscous_drag(
     """Compute the full-vehicle viscous drag coefficient by panel
     integration.
 
-    Algorithm: each WINDWARD panel contributes a friction force
+    Algorithm: each WETTED panel contributes a friction force
         dF_fric = (1/2 rho_e u_e^2 Cf_panel) A_panel * (-v̂_∞)
     where Cf_panel is the chord-averaged skin friction at the panel's
     local Eckert reference state. Streamwise distance for Re_x is taken
     as the panel centroid's distance from the body apex (x_centroid -
     x_apex), which is a coarse but workable proxy for the local
     Reynolds number on a delta-planform vehicle.
+
+    Wetted panels are all but those turned more than 20 deg away from the
+    flow (the base), the faces PySAGAS also leaves at vacuum. Panels
+    parallel to the flow (the upper surface of a caret at alpha = 0) carry
+    friction too; counting only windward panels left them out.
 
     For more accurate results, a streamline-based BL marching would be
     required (Phase 5+ refinement).
@@ -86,7 +92,7 @@ def panel_viscous_drag(
     v_inf = np.array([math.cos(alpha_rad), 0.0, -math.sin(alpha_rad)])
     n_dot_v = np.clip(n_face @ v_inf, -1.0, 1.0)
     theta_local = -np.arcsin(n_dot_v)
-    windward = theta_local > 0.0
+    wetted = theta_local > -math.radians(_BASE_TURN_DEG)
 
     # Crude per-panel post-shock state estimate using local incidence.
     # For windward panels we treat them as 2-D wedges with deflection
@@ -131,7 +137,7 @@ def panel_viscous_drag(
     #   dF/q_inf = (rho_e u_e^2 / (rho_inf u_inf^2)) Cf A * (- v̂_inf)
     q_inf = 0.5 * rho_inf * V_inf * V_inf
     factor = 0.5 * rho_star * u_e * u_e / np.maximum(q_inf, 1e-30)
-    F_fric_q_per_panel = factor * Cf * A_face * windward
+    F_fric_q_per_panel = factor * Cf * A_face * wetted
 
     F_fric_q_total = float(F_fric_q_per_panel.sum())
 
@@ -149,7 +155,7 @@ def panel_viscous_drag(
         Re_chord_max=float(Re_x.max()),
         Cf_panel=Cf,
         state_per_panel={"T_star": T_star, "rho_star": rho_star,
-                          "u_e": u_e, "Re_x": Re_x, "windward": windward},
+                          "u_e": u_e, "Re_x": Re_x, "wetted": wetted},
         S_ref=S_ref,
     )
 

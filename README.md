@@ -87,6 +87,12 @@ the understanding that defaults and outputs may change between revisions.
   (`planar_waverider.py`, `shadow_waverider.py`).
 - **Aero solver**: vendored [`pysagas/`](pysagas/), an oblique-shock + Prandtl–Meyer
   panel method.
+- **Base pressure and skin friction** (`aero_corrections.py`): PySAGAS is
+  inviscid and leaves the base at vacuum. The Aero Analysis and Optimization
+  tabs correct both: the base gets Igra's (2018) base-pressure correlation and
+  every wetted face gets Eckert reference-temperature skin friction (turbulent,
+  laminar or transitional). Other base pressures, and *Off* for raw PySAGAS,
+  can be chosen. Results show the drag breakdown.
 - **Optimization**: `optimization_engine.py` (NSGA-II via pymoo, OC waverider),
   `method_optimization.py` (NSGA-II for any design tab, via *Send to
   Optimization*), and `surrogate_tab.py` / `ai_surrogate.py` (sklearn / PyTorch
@@ -209,6 +215,16 @@ The methods implemented in WADOS draw on the following works:
    in a high-dimensional design space. *AIAA SCITECH 2024 Forum*, p. 2838.
    [doi:10.2514/6.2024-2838](https://doi.org/10.2514/6.2024-2838)
    — author of PySAGAS, the panel-method aero solver vendored here.
+
+6. **Igra, D. (2018).** Extension of the simple analytical model for
+   waverider design. *Journal of Spacecraft and Rockets*, **55**(4),
+   1024–1027. https://doi.org/10.2514/1.A34089
+   — base-pressure correlation used by `aero_corrections.py`.
+
+7. **Igra, D. (2019).** Nonslender waverider design implementation into
+   simple analytical model for waverider design. *Journal of Spacecraft and
+   Rockets*, **56**(3), 967–970. https://doi.org/10.2514/1.A34415
+   — effect of turbulent friction and base pressure on L/D.
 
 Additional references (cited in individual module headers): Sobieczky
 (1990) and Rodi (osculating-cone framework); Nonweiler (caret reference
