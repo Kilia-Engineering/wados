@@ -19,6 +19,7 @@ from typing import Optional
 import numpy as np
 
 from gvwd.geometry.mesh import Mesh
+from gvwd.aero.panel_method import BASE_TURN_DEG
 from pswr.aero.viscous import (   # reuse PSWR-1 primitives (audited & tested)
     sutherland_viscosity,
     eckert_reference_T,
@@ -29,7 +30,6 @@ from pswr.aero.viscous import (   # reuse PSWR-1 primitives (audited & tested)
 
 _R_AIR = 287.05
 _GAMMA = 1.4
-_BASE_TURN_DEG = 20.0      # faces turned further from the flow are base (no friction)
 
 
 @dataclass
@@ -92,7 +92,7 @@ def panel_viscous_drag(
     v_inf = np.array([math.cos(alpha_rad), 0.0, -math.sin(alpha_rad)])
     n_dot_v = np.clip(n_face @ v_inf, -1.0, 1.0)
     theta_local = -np.arcsin(n_dot_v)
-    wetted = theta_local > -math.radians(_BASE_TURN_DEG)
+    wetted = theta_local > -math.radians(BASE_TURN_DEG)        # the base has no friction
 
     # Crude per-panel post-shock state estimate using local incidence.
     # For windward panels we treat them as 2-D wedges with deflection

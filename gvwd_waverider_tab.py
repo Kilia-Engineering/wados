@@ -51,6 +51,7 @@ from gvwd.geometry import (
     numerical_volume, planform_area_from_mesh, eta_V,
 )
 from gvwd.aero.coefficients import aero_coefficients_full
+from aero_corrections import BASE_MODELS
 from gvwd.aero.sweep import SweepConfig, mach_alpha_sweep
 from gvwd.aero.panel_method import freestream_direction
 from gvwd.export.stl import write_stl
@@ -1239,6 +1240,10 @@ class GVWDWaveriderTab(QWidget):
         self.Re_x_tr = _spin(1e4, 1e8, 1.0e6, 1e5, 0)
         self.Re_x_tr.setToolTip("Re_x at laminar->turbulent BL transition.")
         layout.addWidget(QLabel("Re_x,tr:"), row, 0); layout.addWidget(self.Re_x_tr, row, 1); row += 1
+        from aero_corrections_panel import base_pressure_combo
+        self.base_pressure_combo = base_pressure_combo()
+        layout.addWidget(QLabel("base pressure:"), row, 0)
+        layout.addWidget(self.base_pressure_combo, row, 1); row += 1
         g.setLayout(layout)
         return g
 
@@ -1360,6 +1365,7 @@ class GVWDWaveriderTab(QWidget):
             altitude_km=self.alt_km.value(),
             T_w=self.T_w.value(),
             Re_x_tr=self.Re_x_tr.value(),
+            base_pressure=self.base_pressure_combo.currentData(),
         )
         # FinsConfig (library) carries a single set of fin params for
         # legacy paths (provenance hash, save/load via YAML). Pull
@@ -1479,6 +1485,7 @@ class GVWDWaveriderTab(QWidget):
                     altitude_km=self.alt_km.value(),
                     T_w=self.T_w.value(),
                     Re_x_tr=self.Re_x_tr.value(),
+                    base_pressure=self.base_pressure_combo.currentData(),
                 )
             dt = time.perf_counter() - t0
             self._update_output_label(on_design_dt=dt)
@@ -1506,6 +1513,7 @@ class GVWDWaveriderTab(QWidget):
             altitude_km=self.alt_km.value(),
             T_w=self.T_w.value(),
             Re_x_tr=self.Re_x_tr.value(),
+            base_pressure=self.base_pressure_combo.currentData(),
         )
         self.btn_sweep.setEnabled(False)
         self.sweep_progress.setRange(0, sw_cfg.M_grid[2] * sw_cfg.alpha_grid_deg[2])
@@ -1690,6 +1698,8 @@ class GVWDWaveriderTab(QWidget):
             lines.append(f"  CL          = {d['CL']:+.5f}")
             lines.append(f"  CD_total    = {d['CD_total']:+.5f}")
             lines.append(f"  CD_wave     = {d['CD_wave']:+.5f}")
+            lines.append(f"  CD_base     = {d['CD_base']:+.5f}  (in CD_wave; "
+                         f"{BASE_MODELS[d['base_pressure']]})")
             lines.append(f"  CD_friction = {d['CD_friction']:+.5f}")
             lines.append(f"  Cm          = {d['Cm']:+.5f}")
             lines.append(f"  L/D         = {d['LD']:.3f}")

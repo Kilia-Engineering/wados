@@ -28,6 +28,7 @@ def aero_coefficients_full(
     S_ref: Optional[float] = None,
     L_ref: Optional[float] = None,
     x_ref: Optional[float] = None,
+    base_pressure: str = "freestream",
 ) -> dict:
     """Full coefficient breakdown for a closed mesh at (M_inf, alpha).
 
@@ -35,7 +36,8 @@ def aero_coefficients_full(
     -------
     dict with keys:
       M_inf, alpha_deg
-      CL, CD_total, CD_wave, CD_friction, Cm, L_over_D
+      CL, CD_total, CD_wave (base drag included), CD_base, CD_friction, Cm,
+      L_over_D, base_pressure (the model; see panel_aero_coefficients)
       panel: PanelAeroResult
       viscous: ViscousResult
       altitude_km, T_w
@@ -44,6 +46,7 @@ def aero_coefficients_full(
     inv = panel_aero_coefficients(
         mesh, M_inf, alpha_rad,
         gamma=gamma, S_ref=S_ref, L_ref=L_ref, x_ref=x_ref,
+        base_pressure=base_pressure,
     )
     visc = panel_viscous_drag(
         mesh, M_inf, alpha_rad,
@@ -59,6 +62,7 @@ def aero_coefficients_full(
         "CL": inv.CL,
         "CD_total": CD_total,
         "CD_wave": inv.CD,
+        "CD_base": inv.CD_base,
         "CD_friction": visc.CD_friction,
         "Cm": inv.Cm,
         "LD": LD,
@@ -66,6 +70,7 @@ def aero_coefficients_full(
         "viscous": visc,
         "altitude_km": altitude_km,
         "T_w": T_w,
+        "base_pressure": base_pressure,
         "Re_chord_max": visc.Re_chord_max,
         "delta_BL_max": visc.delta_BL_max,
         "S_ref": inv.S_ref,

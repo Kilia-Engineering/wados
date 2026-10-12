@@ -47,6 +47,8 @@ class SweepConfig:
     T_w: float = 1500.0
     Re_x_tr: float = 1.0e6
     gamma: float = 1.4
+    # Base-pressure model (panel_aero_coefficients); "freestream" is Cp = 0
+    base_pressure: str = "freestream"
     # LE / nose radii for heating evaluation (fixed across the sweep —
     # the heating numbers scale as 1/sqrt(R), so changing them is just a
     # post-hoc multiplication).
@@ -80,7 +82,7 @@ def mach_alpha_sweep(mesh: Mesh, cfg: Optional[SweepConfig] = None,
     Returns
     -------
     DataFrame with one row per (M, alpha) cell. Columns:
-      M_inf, alpha_deg, CL, CD_total, CD_wave, CD_friction, Cm, LD,
+      M_inf, alpha_deg, CL, CD_total, CD_wave, CD_base, CD_friction, Cm, LD,
       q_LE_swept_W_m2, q_nose_W_m2, beta_attached_margin_deg,
       Re_chord_max, delta_BL_max, regime_share_attached,
       regime_share_newtonian, regime_share_shadow.
@@ -115,6 +117,7 @@ def mach_alpha_sweep(mesh: Mesh, cfg: Optional[SweepConfig] = None,
                 inv = panel_aero_coefficients(
                     mesh, M, alpha, gamma=cfg.gamma,
                     S_ref=cfg.S_ref, L_ref=cfg.L_ref, x_ref=cfg.x_ref,
+                    base_pressure=cfg.base_pressure,
                 )
                 visc = panel_viscous_drag(
                     mesh, M, alpha,
@@ -155,6 +158,7 @@ def mach_alpha_sweep(mesh: Mesh, cfg: Optional[SweepConfig] = None,
                 "CL": inv.CL,
                 "CD_total": CD_total,
                 "CD_wave": inv.CD,
+                "CD_base": inv.CD_base,
                 "CD_friction": visc.CD_friction,
                 "Cm": inv.Cm,
                 "LD": LD,
