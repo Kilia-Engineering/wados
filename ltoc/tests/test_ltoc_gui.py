@@ -84,6 +84,35 @@ def test_refused_stations_are_listed_and_exports_stay_disabled(app, tab):
     assert tab.waverider is None
     assert not tab.btn_export_stl.isEnabled()
     assert "sub_mach" in tab.output_label.text()
+    assert "What to change:" in tab.output_label.text()
+    text = tab.output_label.text()
+    assert "too weak" in text and "too strong" not in text
+    assert "Mach number " in text and "(now 4)" in text            # the range that fixes it
+
+
+def test_limits_box_follows_the_inputs(app, tab):
+    from ltoc_waverider_tab import BSPLINE, CUSTOM
+
+    tab.source_combo.setCurrentText("Shape-changing elliptic shock, Mach 7 (published case II)")
+    assert tab.limits_group.isVisibleTo(tab)
+    assert "Within the recommended limits" in tab.limits_label.text()
+    tab.shock_spins["a_q"].setValue(0.55)                          # too weak at the sides
+    assert tab.source_combo.currentText() == CUSTOM
+    t0 = time.time()                                               # the check waits for a pause
+    while "too weak" not in tab.limits_label.text() and time.time() - t0 < 5.0:
+        app.processEvents()
+        time.sleep(0.02)
+    assert "too weak" in tab.limits_label.text()
+    assert "base half-width a_q:" in tab.limits_label.text() and "<- now 0.55" in tab.limits_label.text()
+    tab.fct_spin.setValue(0.9)                                     # above the base ellipse
+    tab.update_limits()
+    assert "Error: The FCT height" in tab.limits_label.text()
+    tab.generate()
+    assert "Input error" in tab.output_label.text() and "Try Z = 0.24" in tab.output_label.text()
+    tab.source_combo.setCurrentText(BSPLINE)
+    assert not tab.limits_group.isVisibleTo(tab)
+    tab.source_combo.setCurrentIndex(0)
+    assert tab.limits_group.isVisibleTo(tab)
 
 
 def test_oc_import_without_an_oc_design_gives_an_input_error(tab):

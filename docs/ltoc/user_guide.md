@@ -20,7 +20,7 @@ In WADOS it is the **LTOCs Waverider** tab (`ltoc_waverider_tab.py`) and the `lt
 | Station spacing | Clustered at the symmetry plane (default) or uniform. Clustering matters when the FCT meets the shock near its apex (R1 case I). |
 | Points per stream surface | Shock points between the leading edge and the base. 40 (default) converges the forces to < 0.03 %; the cost grows with its square. |
 
-Editing a preset's numbers turns it into a custom shock. With the OC import, the shock, Mach number and leading edge come from the OC design, and LTOCs reproduces that design (validation V5).
+Editing a preset's numbers turns it into a custom shock. For presets and custom shocks, the **Shock limits** box below the inputs checks the design as you type (§1.2). With the OC import, the shock, Mach number and leading edge come from the OC design, and LTOCs reproduces that design (validation V5).
 
 ### 1.1 Shock data files
 
@@ -63,16 +63,16 @@ Shock data are embedded in project files, so a project does not depend on the CS
   - shock extension past the base, needed vs used (determinacy);
   - body mesh step ratio.
 
-**Refusals.** If any station is refused, no geometry is built, and every refused station is listed with its reason:
+**Refusals.** If any station is refused, no geometry is built. The output lists every refused station with its reason, then **What to change**: where on the span the refused stations are, and, for an elliptic shock, which limit of §1.2 the design breaks, with the input ranges that fix it.
 
 | Status | Meaning | What to change |
 |---|---|---|
 | `concave` | the shock cross-section curves away from the body (κ_b < 0) | use a shock that wraps around the body |
-| `sub_mach` | shock angle at or below the Mach angle | raise the Mach number or the shock angle |
-| `detached` | shock angle beyond detachment | lower the shock angle |
-| `undetermined` | the shock does not determine the body up to the base. Analytic shocks are extended automatically; data shocks are never extrapolated | extend the shock data past the base |
-| `outside_shock` | the FCT lies outside the shock at the base | move the FCT inside the shock trace |
-| `limit_surface` | characteristics of one family crossed | a different shock or FCT |
+| `sub_mach` | shock angle at or below the Mach angle | a steeper shock (larger base ellipse, shorter shock), a higher FCT or a higher Mach number |
+| `detached` | shock angle beyond detachment | a less steep shock |
+| `undetermined` | the shock does not determine the body up to the base. Analytic shocks are extended automatically (up to 6 chords); data shocks are never extrapolated | for an analytic shock, usually too weak: as `sub_mach`; for data, extend them past the base |
+| `outside_shock` | the shock data end before the base plane | extend the shock data |
+| `limit_surface` | characteristics of one family crossed: the flow behind the shock folds | see §1.2: usually a shock too close to the Mach angle, too strong (post-shock Mach below 1.5), or much steeper at the symmetry plane than at the sides |
 
 **Export and analysis**
 
@@ -90,6 +90,29 @@ The shock numbers are always stored. A preset whose numbers differ from the save
 *Send to Aero Analysis* loads the waverider into the **Aero Analysis** tab (closed full-span mesh, A_ref set to its planform area) for the preview, the PySAGAS analysis or the AeroDeck sweep. That tab's mesh dialog also offers *LTOCs Waverider* directly.
 
 *Send to Optimization* opens the current inputs in the **Optimization** tab (genetic algorithm with PySAGAS): the FCT height and the base ellipse size vary by default, and the upstream ellipse can be added. Each design solves every stream surface, so fewer stations make the optimization faster; designs with refused stations count as failed. *Apply best design to its tab* loads the result back. See `Optimization_Guide.md`.
+
+### 1.2 Limits of a custom elliptic shock
+
+The shock angle β of the elliptic ruled shock follows from the two ellipses (`ltoc/limits.py`). With a = a_p + n (a_q − a_p) and b = b_p + n (b_q − b_p) on the cross-section n (n = 0 upstream ellipse, n = 1 base plane) and m the angle around the ellipse:
+
+tan β = (a Δb sin²m + b Δa cos²m) / (Δx √(b² cos²m + a² sin²m)),  Δa = a_q − a_p, Δb = b_q − b_p, Δx = x_q − x_p.
+
+At the symmetry plane β = atan(Δb / Δx), at the side β = atan(Δa / Δx). Both base half-axes must exceed the upstream ones, or the shock angle is zero or negative somewhere.
+
+Which part of the shock matters depends on the FCT. The shock curves start on the leading edge and drift toward the sides as they run downstream, past the base plane, where a weak shock needs them extended up to 6 chords. A low FCT gives a wide waverider that uses the shock near the sides; a high FCT keeps it near the symmetry plane. The **Shock limits** box therefore traces the shock curves of 8 stations 6 chords past the base, as the build can, and checks β along them:
+
+| Limit | Rule | Why |
+|---|---|---|
+| Weak shock | β ≥ μ + 1.5° + 0.2 (β_sym − β), with μ = asin(1/M) and β_sym at the symmetry plane | near the Mach angle the shock layer is thin: the body is not determined, or the flow folds. A shock that weakens along its curves needs more margin |
+| Strong shock | post-shock Mach number ≥ 1.5 at the largest β (β up to 53–57° from Mach 4 to 15) | the flow keeps compressing toward the body and turns sonic there; this also keeps the shock attached (detachment near 65–67°) |
+| Shape change | β no more than 25° below β_sym | a shock much steeper at the symmetry plane than where the curves drift folds the flow |
+| FCT | 0 < Z < b_q | the FCT must meet the base ellipse |
+
+For each of a_q, b_q, x_q, the Mach number and Z, the box gives the range that meets all four with the other inputs fixed, and marks the inputs outside their range. It is green when the design is inside the limits, orange when a limit is broken (stations will probably be refused) and red when the design cannot be built. After a refused build, *What to change* repeats the broken limits with the ranges.
+
+The rules come from 54 builds: variants of R1 cases I and II, elliptic cones and circular cones at Mach 3 to 12 (9 stations, 30 points; some rechecked at 25 and 40). All 21 refused designs break a limit. Of the 33 that built, 5 are flagged, all close to a limit. They are rules of thumb: keep away from the ends of the ranges.
+
+Example: case II (Mach 7, Z = 0.25) with the base half-width lowered from 0.65 to 0.55. Near the sides β = 10.3°, 2.0° above the Mach angle (8.2°), where 4.1° is needed, and stations are refused (limit surface, undetermined). The box recommends a_q ≥ 0.59, or b_q ≤ 0.59, or x_q ≤ 1.21, or Mach ≥ 9.3, or Z ≥ 0.55. Each of a_q = 0.60, b_q = 0.58, x_q = 1.2, Mach 9.4 and Z = 0.56 builds, at 9 stations and 30 points as at the default 25 and 40. Changes inside the old, looser ranges (Mach 7.5, x_q = 1.42, Z = 0.45 or 0.5) were still refused.
 
 ---
 

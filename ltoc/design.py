@@ -68,7 +68,8 @@ class EllipticShock:
     def tip_y(self, fct_z: float) -> float:
         """Span at which the FCT ``Z = fct_z`` meets the shock in the base plane."""
         if not 0.0 < fct_z < self.b_q:
-            raise ValueError(f"FCT Z = {fct_z:g} must lie between 0 and b_q = {self.b_q:g}")
+            raise ValueError(f"FCT Z = {fct_z:g} must lie between 0 and b_q = {self.b_q:g} (the base "
+                             f"half-height), so that the FCT meets the base ellipse")
         return self.a_q * np.sqrt(1.0 - (fct_z / self.b_q) ** 2)
 
 
@@ -598,7 +599,9 @@ class LTOCDesign:
         else:
             s = self.shock
             if min(s.a_q, s.b_q) <= 0.0 or s.x_q <= s.x_p:
-                raise ValueError("the base ellipse must be non-degenerate and downstream of p(m)")
+                raise ValueError("the base ellipse must be non-degenerate (a positive half-width "
+                                 "and half-height) and downstream of the upstream ellipse "
+                                 f"(base X = {s.x_q:g}, upstream X = {s.x_p:g})")
             self.shock.tip_y(self.fct_z)
 
     def base_x(self) -> float:
