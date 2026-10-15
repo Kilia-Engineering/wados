@@ -233,6 +233,14 @@ def _resample_stream(stream, target_n):
     return resampled
 
 
+def _tangent_index(n_pts):
+    """Sample index for a stream's tangent direction: about a quarter of the
+    stream downstream of the LE (at least 2), within the stream. Upper and
+    lower streams differ in length (near the wingtip the lower one can have
+    only a few points), so each gets its own index."""
+    return min(max(2, n_pts // 4), n_pts - 1)
+
+
 def _compute_bezier_blunt_profile(le_pt, us_pts, ls_pts, local_radius,
                                    n_bezier=10):
     """
@@ -266,15 +274,12 @@ def _compute_bezier_blunt_profile(le_pt, us_pts, ls_pts, local_radius,
         'tp_lower'     : ndarray (3,)
         'valid'        : bool
     """
-    n_pts = us_pts.shape[0]
-    j_tan = max(2, min(n_pts // 4, n_pts - 1))
-
     # Tangent directions (pointing downstream from LE)
-    t_u = us_pts[j_tan] - us_pts[0]
+    t_u = us_pts[_tangent_index(len(us_pts))] - us_pts[0]
     n = np.linalg.norm(t_u)
     t_u = t_u / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 
-    t_l = ls_pts[j_tan] - ls_pts[0]
+    t_l = ls_pts[_tangent_index(len(ls_pts))] - ls_pts[0]
     n = np.linalg.norm(t_l)
     t_l = t_l / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 
@@ -1043,14 +1048,11 @@ def _compute_arc_at_station(le_pt, us_pts, ls_pts, local_radius, n_arc=8):
     # For cone-derived waverider, upper is flat (freestream) and lower curves
     # gradually, so near-LE points give nearly identical tangents. Use ~20-30%
     # of the streamwise extent for reliable dihedral angle estimation.
-    n_pts = us_pts.shape[0]
-    j_tan = max(2, min(n_pts // 4, n_pts - 1))
-
-    t_u = us_pts[j_tan] - us_pts[0]
+    t_u = us_pts[_tangent_index(len(us_pts))] - us_pts[0]
     n = np.linalg.norm(t_u)
     t_u = t_u / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 
-    t_l = ls_pts[j_tan] - ls_pts[0]
+    t_l = ls_pts[_tangent_index(len(ls_pts))] - ls_pts[0]
     n = np.linalg.norm(t_l)
     t_l = t_l / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 
@@ -1215,13 +1217,10 @@ def compute_pre_blunted_streams(us_streams, ls_streams, radius, n_bezier=10,
         modified_lower.append(mod_ls)
         blunted_le.append(result['blunt_tip'])
 
-    # Resample all streams to a uniform length so interpPlate gets a
-    # regular grid (blunted stations may differ from non-blunted ones).
-    if modified_upper:
-        target_n = max(s.shape[0] for s in modified_upper)
-        modified_upper = [_resample_stream(s, target_n) for s in modified_upper]
-        modified_lower = [_resample_stream(s, target_n) for s in modified_lower]
-
+    # The streams keep their own lengths: resampling them uniformly would
+    # space the points ~L/n apart and lose the mm-scale Bezier profile. The
+    # STEP export fits surfaces through them with LE clustering
+    # (cad_export.build_compensated_solid).
     return {
         'modified_upper': modified_upper,
         'modified_lower': modified_lower,
@@ -1384,13 +1383,11 @@ def compute_blunted_le_preview(waverider, radius, n_points=50):
             continue
 
         # Get tangent directions using well-downstream point for stability
-        n_pts = us.shape[0]
-        j_tan = max(2, min(n_pts // 4, n_pts - 1))
-        t_u = us[j_tan] - us[0]
+        t_u = us[_tangent_index(len(us))] - us[0]
         n = np.linalg.norm(t_u)
         t_u = t_u / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 
-        t_l = ls[j_tan] - ls[0]
+        t_l = ls[_tangent_index(len(ls))] - ls[0]
         n = np.linalg.norm(t_l)
         t_l = t_l / n if n > 1e-12 else np.array([1, 0, 0], dtype=float)
 

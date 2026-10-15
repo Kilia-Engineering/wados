@@ -273,3 +273,64 @@ def test_gvwd_tab_base_pressure(hub):
     assert tab.on_design["CD_base"] == 0.0
     assert tab.on_design["LD"] > igra["LD"]
     tab.base_pressure_combo.setCurrentIndex(tab.base_pressure_combo.findData("igra"))
+
+
+def test_window_fits_a_screen(hub):
+    """No tab sets a minimum height taller than a screen: a maximized window
+    used to squeeze the OC tab's groups (the LE Fillet Compensation rows
+    collapsed to a few pixels). The OC parameters scroll instead."""
+    assert hub.minimumSizeHint().height() < 800
+    hub.tab_widget.setCurrentIndex(hub._oc_tab_index)
+    hub.resize(1920, 1000)
+    hub.show()
+    for _ in range(20):
+        hub._app.processEvents()
+        time.sleep(0.01)
+    for w in (hub.lecomp_R_spin, hub.lecomp_taper_spin, hub.lecomp_exact_check,
+              hub.lecomp_check_btn, hub.blunting_radius_spin, hub.min_thickness_check):
+        assert w.height() >= w.minimumSizeHint().height(), w
+    assert hub.oc_param_panel.widget().width() == 380
+    hub.hide()
+
+
+def test_oc_blunting_carries_to_aero_analysis(hub, tmp_path, monkeypatch):
+    """The OC tab's LE radius goes with its design to Aero Analysis, whose
+    worker then adds the rounded edge's drag and reports its heat flux."""
+    import waverider_gui as W
+    from aero_corrections import AeroCorrections
+
+    monkeypatch.chdir(tmp_path)
+    hub.generate_waverider()
+    group = hub.aero_corrections_group
+    try:
+        hub.blunting_check.setChecked(True)
+        hub.blunting_radius_spin.setValue(0.01)
+        hub.blunting_sweep_combo.setCurrentIndex(1)
+        hub._send_oc_to_aero_analysis()
+        c = group.corrections()
+        assert c.le_radius == pytest.approx(0.01) and c.le_radius_sweep_scaled
+        assert "blunt LE R = 10 mm" in hub.aero_geo_status.text()
+
+        out = []
+        worker = W.AnalysisWorker(hub.last_stl_file, {"mach": 5.0, "pressure": 2549.0,
+                                                      "temperature": 221.55},
+                                  0.0, hub.aref_spin.value(), corrections=c)
+        worker.finished.connect(out.append)
+        worker.error.connect(out.append)
+        worker.run()
+        assert isinstance(out[0], dict), out[0]
+        assert out[0]["CD_le"] > 0.0 and out[0]["q_LE_max"] > 0.0
+        assert "Blunt LE (modified Newtonian)" in W._drag_breakdown_text(out[0])
+
+        hub.blunting_check.setChecked(False)                 # Mode B: the CAD fillet's R
+        hub.lecomp_check.setChecked(True)
+        hub.lecomp_R_spin.setValue(5.0)
+        hub._send_oc_to_aero_analysis()
+        assert group.corrections().le_radius == pytest.approx(0.005)
+        hub.lecomp_check.setChecked(False)                   # sharp
+        hub._send_oc_to_aero_analysis()
+        assert group.corrections().le_radius == 0.0
+    finally:
+        hub.blunting_check.setChecked(False)
+        hub.lecomp_check.setChecked(False)
+        group.set_corrections(AeroCorrections())

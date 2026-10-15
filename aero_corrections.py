@@ -60,6 +60,9 @@ class AeroCorrections:
     friction: str = "turbulent"
     wall_temperature: float = 1000.0       # K
     transition_re: float = 1.0e6           # Re*_x at transition ("transition" only)
+    le_radius: float = 0.0                 # m; rounded leading edge, 0 = sharp
+    le_radius_sweep_scaled: bool = False   # R cos^2.2(planform sweep) instead of uniform
+    le_bleed: bool = True                  # pressure bleed behind the rounded LE
 
     def __post_init__(self):
         if self.base_pressure not in BASE_MODELS:
@@ -69,7 +72,7 @@ class AeroCorrections:
 
     @property
     def active(self) -> bool:
-        return self.base_pressure != "vacuum" or self.friction != "off"
+        return self.base_pressure != "vacuum" or self.friction != "off" or self.le_radius > 0
 
     def describe(self) -> str:
         friction = FRICTION_MODELS[self.friction]
@@ -77,7 +80,12 @@ class AeroCorrections:
             friction += f" at Re_x = {self.transition_re:.3g}"
         if self.friction != "off":
             friction += f", T_w = {self.wall_temperature:.0f} K"
-        return f"Base pressure: {BASE_MODELS[self.base_pressure]}; skin friction: {friction}"
+        text = f"Base pressure: {BASE_MODELS[self.base_pressure]}; skin friction: {friction}"
+        if self.le_radius > 0:
+            text += (f"; blunt LE: R = {self.le_radius * 1000:.3g} mm "
+                     f"({'sweep-scaled' if self.le_radius_sweep_scaled else 'uniform'}), "
+                     f"pressure bleed {'on' if self.le_bleed else 'off'}")
+        return text
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -152,7 +160,11 @@ def corrected_coefficients(solver, A_ref: float, c_ref: float = 1.0,
     Returns ``CL``, ``CD``, ``Cm`` (corrected), ``CL_inviscid``, ``CD_inviscid``,
     ``Cm_inviscid`` (PySAGAS as is), ``CD_base`` and ``CD_friction`` (the drag
     each correction adds; ``CD_base`` is negative when the base pressure is
-    above vacuum), ``base_faces``, ``Re_max`` and ``corrections`` (a description).
+    above vacuum), ``CD_le`` and ``CD_bleed`` (the rounded leading edge's
+    pressure force and pressure bleed, ``blunt_le_corrections``), ``CL_blunt``
+    (the lift they add), ``q_LE_max`` (peak stagnation-line heat flux, W/m^2;
+    NaN for a sharp edge), ``LE_length``, ``base_faces``, ``Re_max`` and
+    ``corrections`` (a description).
     """
     from pysagas.cfd.solver import FlowResults
     from pysagas.geometry import Vector
@@ -193,11 +205,83 @@ def corrected_coefficients(solver, A_ref: float, c_ref: float = 1.0,
         dF_fric, dM_fric = F_fric.sum(axis=0), np.cross(r[wet], F_fric).sum(axis=0)
         Re_max = float(Re.max())
 
-    CL, CD, Cm = coefficients(F + dF_base + dF_fric, Mom + dM_base + dM_fric)
+    blunt = blunt_le_corrections(corr, flow, points, n, c, A, method, r, length_unit)
+    dF = dF_base + dF_fric + blunt["F_le"] + blunt["F_bleed"]
+    dM = dM_base + dM_fric + blunt["M_le"] + blunt["M_bleed"]
+    CL, CD, Cm = coefficients(F + dF, Mom + dM)
     _, CD_base, _ = coefficients(dF_base, dM_base)
     _, CD_fric, _ = coefficients(dF_fric, dM_fric)
+    CL_le, CD_le, _ = coefficients(blunt["F_le"], blunt["M_le"])
+    CL_bleed, CD_bleed, _ = coefficients(blunt["F_bleed"], blunt["M_bleed"])
     return {"CL": float(CL), "CD": float(CD), "Cm": float(Cm),
             "CL_inviscid": float(CL0), "CD_inviscid": float(CD0), "Cm_inviscid": float(Cm0),
             "CD_base": float(CD_base), "CD_friction": float(CD_fric),
+            "CD_le": float(CD_le), "CD_bleed": float(CD_bleed),
+            "CL_blunt": float(CL_le + CL_bleed), "q_LE_max": blunt["q_LE_max"],
+            "LE_length": blunt["LE_length"], "le_radius": corr.le_radius,
             "base_faces": int(vacuum.sum()), "Re_max": Re_max,
             "corrections": corr.describe()}
+
+
+def blunt_le_corrections(corr: AeroCorrections, flow, points, n, c, A, method, r,
+                         length_unit: float = 1.0) -> dict:
+    """Force and moment of a leading edge rounded to ``corr.le_radius``.
+
+    The leading edge is found on the mesh (``points``: the cells' corners, 3
+    per cell, outward winding). Its rounded arc carries modified Newtonian
+    pressure; the compression faces (PySAGAS oblique or normal shock) get the
+    pressure bleed of the nearest LE edge, at their distance x behind it
+    along the flow (``waverider_generator.blunting_aero``). ``n`` are
+    PySAGAS's inward normals, ``r`` the centroids relative to the moment
+    reference.
+    """
+    zero = np.zeros(3)
+    out = {"F_le": zero, "M_le": zero, "F_bleed": zero, "M_bleed": zero,
+           "q_LE_max": float("nan"), "LE_length": 0.0}
+    if corr.le_radius <= 0.0:
+        return out
+    from waverider_generator import blunting_aero as B
+
+    u = np.asarray(flow.direction.vec, float)
+    u /= np.linalg.norm(u)
+    # weld the cells' corners into a mesh, to find the edges shared by two faces
+    size = float(np.ptp(points, axis=0).max())
+    _, inverse = np.unique(np.round(points / (1e-9 * size)), axis=0, return_inverse=True)
+    inverse = inverse.ravel()
+    vertices = np.zeros((inverse.max() + 1, 3))
+    vertices[inverse] = points
+    p0, p1, na, nb = B.sharp_leading_edges(vertices, inverse.reshape(-1, 3), u)
+    if len(p0) == 0:
+        return out
+    # Forces in PySAGAS's convention (mesh units taken as metres); the radius
+    # is converted to mesh units
+    radius = B.edge_radius(p0, p1, corr.le_radius / length_unit, corr.le_radius_sweep_scaled)
+    mid = 0.5 * (p0 + p1)
+    reference = (c - r)[0]                               # the moment reference
+    F_le = B.newtonian_arc_force(p0, p1, na, nb, radius, u, B.cp_max(flow.M, flow.gamma)) * flow.q
+    out["F_le"] = F_le.sum(axis=0)
+    out["M_le"] = np.cross(mid - reference, F_le).sum(axis=0)
+    sweep = B.flow_sweep(p0, p1, u)
+    q_le = B.le_heat_flux(flow.rho, flow.v, radius * length_unit, sweep)
+    out["q_LE_max"] = float(q_le[np.isfinite(q_le)].max()) if np.isfinite(q_le).any() else float("nan")
+    out["LE_length"] = float(np.linalg.norm(p1 - p0, axis=1).sum() * length_unit)
+
+    compression = np.isin(method, (2, 3)) if corr.le_bleed else np.zeros(len(c), bool)
+    if compression.any():
+        cc = c[compression]
+        lateral = lambda p: p - (p @ u)[:, None] * u
+        lat_c, lat_m = lateral(cc), lateral(mid)
+        nearest = np.empty(len(cc), int)
+        for k in range(0, len(cc), 2048):                # nearest LE edge across the flow
+            d = np.linalg.norm(lat_c[k:k + 2048, None, :] - lat_m[None, :, :], axis=2)
+            nearest[k:k + 2048] = d.argmin(axis=1)
+        x = (cc - mid[nearest]) @ u
+        behind = (x > 0.0) & (radius[nearest] > 0.0)
+        alpha = float(np.arctan2(u[1], u[0]))
+        dp = np.zeros(len(cc))
+        dp[behind] = B.pressure_bleed(flow.M, alpha, sweep[nearest][behind],
+                                      x[behind] / radius[nearest][behind]) * flow.P
+        F_bleed = n[compression] * (dp * A[compression])[:, None]          # F = n p A
+        out["F_bleed"] = F_bleed.sum(axis=0)
+        out["M_bleed"] = np.cross(r[compression], F_bleed).sum(axis=0)
+    return out

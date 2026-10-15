@@ -728,6 +728,8 @@ def evaluate_single_design(
             'CD_inviscid': aero['CD_inviscid'],
             'CD_base': aero['CD_base'],
             'CD_friction': aero['CD_friction'],
+            'CD_le': aero['CD_le'],
+            'CD_bleed': aero['CD_bleed'],
             'Volume': volume,
             'planform_area': A_ref_calc,
             'time': eval_time

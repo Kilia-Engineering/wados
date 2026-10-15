@@ -509,6 +509,19 @@ class _OCAnalysisSource:
         wr = self.waverider
         return f"M={wr.M_inf:g}, \u03b2={wr.beta:g}\u00b0, L={wr.length:.3g} m (sharp geometry)"
 
+    def le_bluntness(self):
+        """(radius in m, sweep-scaled) of the leading edge the OC tab exports:
+        its LE blunting, or the CAD fillet radius of a constant Mode B
+        compensation; (0, False) for a sharp edge, None for a variable fillet."""
+        g = self._gui
+        if g.blunting_check.isChecked():
+            return g.blunting_radius_spin.value(), g.blunting_sweep_combo.currentIndex() == 1
+        if g.lecomp_check.isChecked():
+            if g.lecomp_mode_combo.currentIndex() == 1:
+                return None
+            return g.lecomp_R_spin.value() / 1000.0, False
+        return 0.0, False
+
     def stl_for_analysis(self):
         from geometry_export import streams_to_mesh, write_temp_stl
 
@@ -861,11 +874,19 @@ def _drag_breakdown_text(results):
     """Drag breakdown lines for an AnalysisWorker result (aero_corrections)."""
     if 'CD_inviscid' not in results:
         return ""
-    return (f"Drag breakdown:\n"
+    text = (f"Drag breakdown:\n"
             f"  Inviscid (PySAGAS, base at vacuum): {results['CD_inviscid']:.6f}\n"
             f"  Base pressure correction:           {results['CD_base']:+.6f}\n"
-            f"  Skin friction:                      {results['CD_friction']:.6f}\n"
-            f"  ({results['corrections']})\n\n")
+            f"  Skin friction:                      {results['CD_friction']:.6f}\n")
+    if results.get('le_radius', 0.0) > 0.0:
+        if results.get('LE_length', 0.0) > 0.0:
+            text += (f"  Blunt LE (modified Newtonian):      {results['CD_le']:+.6f}\n"
+                     f"  Pressure bleed behind the LE:       {results['CD_bleed']:+.6f}\n"
+                     f"  (blunt LE lift: CL {results['CL_blunt']:+.6f}; peak LE heat flux "
+                     f"{results['q_LE_max'] / 1e6:.2f} MW/m\u00b2)\n")
+        else:
+            text += "  Blunt LE: no sharp leading edge found on the mesh\n"
+    return text + f"  ({results['corrections']})\n\n"
 
 
 class AnalysisWorker(QThread):
@@ -1159,9 +1180,19 @@ class WaveriderGUI(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # Left panel - OC Waverider parameters (shown only on the OC Waverider tab)
-        self.oc_param_panel = self.create_parameter_panel()
-        self.oc_param_panel.setMaximumWidth(380)
+        # Left panel - OC Waverider parameters (shown only on the OC Waverider tab).
+        # Its groups need about 1900 px of height: in a scroll area they keep
+        # their size instead of being squeezed when the window is shorter
+        # (a maximized window cannot grow past the screen).
+        params = self.create_parameter_panel()
+        self.oc_param_panel = QScrollArea()
+        self.oc_param_panel.setWidget(params)
+        self.oc_param_panel.setWidgetResizable(True)
+        self.oc_param_panel.setFrameShape(QFrame.NoFrame)
+        self.oc_param_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        params.setMinimumWidth(320)        # the scroll area fits it to the panel's width
+        # 380 px of content, as before, plus the scroll bar
+        self.oc_param_panel.setFixedWidth(380 + self.oc_param_panel.verticalScrollBar().sizeHint().width())
         main_layout.addWidget(self.oc_param_panel, 1)
 
         # Right panel - Visualization
@@ -1778,6 +1809,13 @@ class WaveriderGUI(QMainWindow):
             QMessageBox.critical(self, handoff.SEND_TEXT,
                                  f"Could not send the {name} design:\n\n{e}")
             return
+        blunt = tab.le_bluntness() if hasattr(tab, "le_bluntness") else None
+        if blunt is not None:              # the analysis uses the tab's LE radius
+            self.aero_corrections_group.set_le_radius(*blunt)
+            if blunt[0] > 0.0:
+                self.aero_geo_status.setText(
+                    f"Mesh received (sharp); blunt LE R = {blunt[0] * 1000:.3g} mm "
+                    f"from the {name} tab — ready to analyze")
         self.tab_widget.setCurrentWidget(self._aero_tab)
 
     def _load_stl_for_analysis(self, path, name):
@@ -2942,7 +2980,6 @@ class WaveriderGUI(QMainWindow):
 
         # --- Left: controls panel ---
         controls = QWidget()
-        controls.setMaximumWidth(320)
         ctrl_layout = QVBoxLayout(controls)
 
         # Import button
@@ -3067,7 +3104,15 @@ class WaveriderGUI(QMainWindow):
         ctrl_layout.addWidget(self.import_status_label)
 
         ctrl_layout.addStretch()
-        layout.addWidget(controls)
+        # Scrollable, so the column never sets the window's minimum height
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidget(controls)
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QFrame.NoFrame)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        controls.setMinimumWidth(260)
+        controls_scroll.setFixedWidth(320 + controls_scroll.verticalScrollBar().sizeHint().width())
+        layout.addWidget(controls_scroll)
 
         # --- Right: 3D viewer ---
         viewer = QWidget()
@@ -5141,7 +5186,8 @@ class WaveriderGUI(QMainWindow):
             sweep_CD = []
             sweep_Cm = []
             sweep_CL_CD = []
-            sweep_CD_parts = {'CD_inviscid': [], 'CD_base': [], 'CD_friction': []}
+            sweep_CD_parts = {'CD_inviscid': [], 'CD_base': [], 'CD_friction': [],
+                              'CD_le': [], 'CD_bleed': []}
             from aero_corrections import corrected_coefficients
 
             point_count = 0
@@ -5245,7 +5291,7 @@ class WaveriderGUI(QMainWindow):
             import csv
             with open(filename, 'w', newline='') as f:
                 writer = csv.writer(f)
-                parts = [k for k in ('CD_inviscid', 'CD_base', 'CD_friction')
+                parts = [k for k in ('CD_inviscid', 'CD_base', 'CD_friction', 'CD_le', 'CD_bleed')
                          if len(self.aerodeck_results.get(k, [])) == len(self.aerodeck_results['aoa'])]
                 writer.writerow(['AoA_deg', 'Mach', 'CL', 'CD', 'Cm', 'CL_CD'] + parts)
                 

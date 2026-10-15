@@ -19,7 +19,7 @@ from __future__ import annotations
 import sys
 
 import numpy as np
-from PyQt5.QtCore import QThread, Qt, pyqtSignal
+from PyQt5.QtCore import QThread, Qt, QTimer, pyqtSignal
 
 import handoff
 from PyQt5.QtGui import QFont
@@ -36,6 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from ltoc import viz
 from ltoc.design import PRESET_ALIASES, PRESETS, EllipticShock, LTOCDesign, ShockData
+from ltoc.limits import refusal_advice, shock_limits
 from ltoc.ltoc import LTOCError
 
 CUSTOM = "Custom elliptic shock (two ellipses)"
@@ -225,6 +226,10 @@ class LTOCWaveriderTab(QWidget):
         self.waverider = None                        # LTOCWaverider when every station solved
         self._worker = None
         self._filling = False
+        self._limits_timer = QTimer(self)
+        self._limits_timer.setSingleShot(True)
+        self._limits_timer.setInterval(250)
+        self._limits_timer.timeout.connect(self.update_limits)
         self._init_ui()
         self._on_source_changed(0)
 
@@ -242,6 +247,7 @@ class LTOCWaveriderTab(QWidget):
         left_l = QVBoxLayout(left_w)
         left_l.addWidget(self._create_shock_group())
         left_l.addWidget(self._create_fct_group())
+        left_l.addWidget(self._create_limits_group())
         left_l.addWidget(self._create_actions_group())
         self.output_label = QLabel("Choose a shock and click 'Generate LTOCs Waverider'.")
         self.output_label.setWordWrap(True)
@@ -394,6 +400,22 @@ class LTOCWaveriderTab(QWidget):
         g.setLayout(lay)
         return g
 
+    def _create_limits_group(self) -> QGroupBox:
+        self.limits_group = QGroupBox("Shock limits (custom elliptic shock)")
+        self.limits_group.setToolTip(
+            "Rules of thumb for the elliptic shock, checked along the shock curves the\n"
+            "waverider uses (ltoc/limits.py; user guide section 1.2). Outside them\n"
+            "stations are usually refused. Ranges hold with the other inputs fixed;\n"
+            "keep away from their ends.")
+        lay = QVBoxLayout()
+        self.limits_label = QLabel("")
+        self.limits_label.setWordWrap(True)
+        self.limits_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.limits_label.setStyleSheet(_OUT_STYLE.format("#aaaaaa"))
+        lay.addWidget(self.limits_label)
+        self.limits_group.setLayout(lay)
+        return self.limits_group
+
     def _create_actions_group(self) -> QGroupBox:
         g = QGroupBox("Actions")
         lay = QGridLayout()
@@ -468,15 +490,34 @@ class LTOCWaveriderTab(QWidget):
             self.reference_label.setText(_DATA_HELP)
         else:
             self.reference_label.setText(_CUSTOM_HELP)
+        self.limits_group.setVisible(not (is_oc or is_data))
+        self.update_limits()
 
     def _on_shock_edited(self, _value):
         """Editing a preset's numbers turns it into a custom shock."""
+        if not self._filling:
+            self._limits_timer.start()          # recheck the limits once typing pauses
         if self._filling or self.source_combo.currentText() not in PRESETS:
             return
         self._filling = True
         self.source_combo.setCurrentText(CUSTOM)
         self._filling = False
         self.reference_label.setText(_CUSTOM_HELP)
+
+    def update_limits(self):
+        """Show the shock angles, limits and recommended ranges of the elliptic shock."""
+        self._limits_timer.stop()
+        name = self.source_combo.currentText()
+        if name in (OC_IMPORT, BSPLINE):
+            return None
+        shock = EllipticShock(**{k: sb.value() for k, sb in self.shock_spins.items()})
+        lim = shock_limits(shock, self.mach_spin.value(), self.fct_spin.value())
+        values = dict(a_q=shock.a_q, b_q=shock.b_q, x_q=shock.x_q,
+                      M_inf=self.mach_spin.value(), fct_z=self.fct_spin.value())
+        color = "#ef4444" if lim.has_errors else "#f59e0b" if lim.issues else "#22c55e"
+        self.limits_label.setText(lim.text(values))
+        self.limits_label.setStyleSheet(_OUT_STYLE.format(color))
+        return lim
 
     def current_design(self) -> LTOCDesign:
         common = dict(n_points=self.points_spin.value())
@@ -634,8 +675,11 @@ class LTOCWaveriderTab(QWidget):
             design = self.current_design()
             design.validate()
         except ValueError as e:
-            self._show_output(f"Input error: {e}", "#ef4444")
+            lim = self.update_limits()
+            fixes = [i.fix for i in lim.issues if i.severity == "error"] if lim else []
+            self._show_output(f"Input error: {e}" + "".join("\n" + f for f in fixes), "#ef4444")
             return
+        self.update_limits()
         self.result, self.waverider = None, None
         for b in (self.btn_export_stl, self.btn_export_step, self.btn_send_aero):
             b.setEnabled(False)
@@ -669,8 +713,11 @@ class LTOCWaveriderTab(QWidget):
         self._finish_run()
         self.result = res
         if not res.ok:
+            advice = refusal_advice(res)
             self._show_output("Some stream surfaces were refused; no geometry was built.\n"
-                              + res.summary(), "#f59e0b")
+                              + res.summary()
+                              + ("\n\nWhat to change:\n" + "\n".join(advice) if advice else ""),
+                              "#f59e0b")
             self.canvas_3d.placeholder("Stations refused: see the list on the left")
             for c in (self.canvas_front, self.canvas_pressure, self.canvas_diag):
                 c.placeholder("Refused stations: see the output panel.")
@@ -886,9 +933,27 @@ class LTOCWaveriderTab(QWidget):
         "  concave       the shock curves away from the body across the span\n"
         "  sub_mach      the shock is too weak: at or below the Mach angle\n"
         "  detached      the shock is too strong: it would detach\n"
-        "  undetermined  the shock does not reach far enough past the base plane\n"
-        "  outside_shock the FCT lies outside the shock in the base plane\n"
-        "  limit_surface the flow solution folds over (limit surface)\n\n"
+        "  undetermined  the body is not determined up to the base plane (a weak\n"
+        "                shock, or shock data that stop too soon past the base)\n"
+        "  outside_shock the shock data end before the base plane\n"
+        "  limit_surface the flow solution folds over (limit surface)\n"
+        "  The output then lists what to change.\n\n"
+        "LIMITS OF A CUSTOM ELLIPTIC SHOCK (rules of thumb, gamma = 1.4)\n"
+        "  The 'Shock limits' box checks these as you type, along the shock curves\n"
+        "  the waverider uses, and gives each input's range with the others fixed.\n"
+        "  Shock angle: at the symmetry plane atan((b_q - b_p) / (x_q - x_p)), at the\n"
+        "    side atan((a_q - a_p) / (x_q - x_p)). The shock curves drift toward the\n"
+        "    sides downstream, so a low FCT uses the shock near the sides.\n"
+        "  Weak:   keep it at least 1.5 deg above the Mach angle asin(1/M), plus\n"
+        "          0.2 deg per degree it falls below its value at the symmetry plane.\n"
+        "          Both base half-axes must exceed the upstream ones.\n"
+        "  Strong: keep the post-shock Mach number at 1.5 or more (a shock angle up\n"
+        "          to 53-57 deg from Mach 4 to 15); stronger shocks turn the flow\n"
+        "          sonic near the body.\n"
+        "  Shape:  keep it within about 25 deg of its value at the symmetry plane;\n"
+        "          shocks much steeper at the centre than at the sides fold the flow.\n"
+        "  FCT:    0 < Z < b_q. A higher FCT keeps the waverider away from the sides\n"
+        "          of the shock, where it is often weakest.\n\n"
         "OUTPUTS\n"
         "  CL, CD, L/D: inviscid lower-surface forces, referenced to the planform\n"
         "    area (this reproduces the published values); wetted-area values too.\n"

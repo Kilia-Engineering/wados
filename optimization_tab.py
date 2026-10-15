@@ -134,9 +134,11 @@ class OptimizationWorker(QThread):
                         f"   Starting design: CL/CD={base['CL'] / base['CD']:.3f}, "
                         f"CL={base['CL']:.4f}, CD={base['CD']:.5f}, Volume={base['Volume']:.4g} m³, "
                         f"Volumetric Efficiency={base['VolEff']:.4f} ({base['time']:.1f} s)")
+                    blunt = (f" {base['CD_le'] + base['CD_bleed']:+.5f} blunt LE"
+                             if base['CD_le'] or base['CD_bleed'] else "")
                     self.log_message.emit(
                         f"   CD = {base['CD_inviscid']:.5f} inviscid {base['CD_base']:+.5f} base "
-                        f"+ {base['CD_friction']:.5f} friction")
+                        f"+ {base['CD_friction']:.5f} friction{blunt}")
                 else:
                     self.log_message.emit(f"   ⚠ Starting design failed: {base['error']}")
                 self.log_message.emit("")
