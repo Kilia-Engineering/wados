@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QGridLayout,
                              QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox,
                              QProgressBar, QTextEdit, QTabWidget, QFileDialog,
-                             QMessageBox, QSplitter, QScrollArea)
+                             QMessageBox, QSplitter, QScrollArea, QFrame)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 
 import handoff
@@ -802,9 +802,14 @@ class ShadowWaveriderTab(QWidget):
         ds_widget = self._create_design_space_widget()
         right_panel.addTab(ds_widget, "Design Space")
 
-        # Gradient Optimization tab
+        # Gradient Optimization tab (its groups need ~880 px: scroll rather
+        # than set the main window's minimum height)
         opt_widget = self._create_gradient_opt_widget()
-        right_panel.addTab(opt_widget, "Gradient Opt")
+        opt_scroll = QScrollArea()
+        opt_scroll.setWidget(opt_widget)
+        opt_scroll.setWidgetResizable(True)
+        opt_scroll.setFrameShape(QFrame.NoFrame)
+        right_panel.addTab(opt_scroll, "Gradient Opt")
 
         # Results tab
         results_widget = QWidget()

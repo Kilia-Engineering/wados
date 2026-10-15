@@ -87,12 +87,18 @@ the understanding that defaults and outputs may change between revisions.
   (`planar_waverider.py`, `shadow_waverider.py`).
 - **Aero solver**: vendored [`pysagas/`](pysagas/), an oblique-shock + Prandtl–Meyer
   panel method.
-- **Base pressure and skin friction** (`aero_corrections.py`): PySAGAS is
-  inviscid and leaves the base at vacuum. The Aero Analysis and Optimization
-  tabs correct both: the base gets Igra's (2018) base-pressure correlation and
-  every wetted face gets Eckert reference-temperature skin friction (turbulent,
-  laminar or transitional). Other base pressures, and *Off* for raw PySAGAS,
-  can be chosen. Results show the drag breakdown.
+- **Base pressure, skin friction and blunt LE** (`aero_corrections.py`):
+  PySAGAS is inviscid, leaves the base at vacuum and sees a sharp mesh. The
+  Aero Analysis and Optimization tabs correct this:
+  - the base gets Igra's (2018) base-pressure correlation;
+  - every wetted face gets Eckert reference-temperature skin friction
+    (turbulent, laminar or transitional);
+  - an optional leading-edge radius adds the rounded edge's Newtonian
+    pressure and pressure bleed, and reports the LE heat flux
+    (`waverider_generator/blunting_aero.py`).
+
+  Other base pressures, and *Off* for raw PySAGAS, can be chosen. Results
+  show the drag breakdown.
 - **Optimization**: `optimization_engine.py` (NSGA-II via pymoo, OC waverider),
   `method_optimization.py` (NSGA-II for any design tab, via *Send to
   Optimization*), and `surrogate_tab.py` / `ai_surrogate.py` (sklearn / PyTorch

@@ -466,7 +466,8 @@ def evaluate_design(method: str, params: dict, flow: dict) -> dict:
     if not all(np.isfinite([CL, CD, Cm])):
         return {"success": False, "error": "PySAGAS returned NaN/Inf", "time": time.time() - t0}
     return {"success": True, "CL": CL, "CD": CD, "Cm": Cm, "CD_inviscid": aero["CD_inviscid"],
-            "CD_base": aero["CD_base"], "CD_friction": aero["CD_friction"], "Volume": volume,
+            "CD_base": aero["CD_base"], "CD_friction": aero["CD_friction"],
+            "CD_le": aero["CD_le"], "CD_bleed": aero["CD_bleed"], "Volume": volume,
             "planform_area": planform, "VolEff": volume ** (2.0 / 3.0) / planform,
             "length": geom.length, "time": time.time() - t0}
 
