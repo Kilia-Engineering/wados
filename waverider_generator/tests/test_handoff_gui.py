@@ -257,3 +257,19 @@ def test_aero_analysis_applies_the_corrections(hub, tmp_path, monkeypatch):
     assert hub.aero_corrections_group.corrections() == AeroCorrections("freestream", "off")
     assert not hub.aero_corrections_group.wall_spin.isEnabled()
     hub.aero_corrections_group.set_corrections(AeroCorrections())
+
+
+def test_gvwd_tab_base_pressure(hub):
+    """The GVWD tab's own aero uses its base-pressure choice (Igra by default)."""
+    tab = _generate(hub, "gvwd_waverider_tab")
+    assert tab.base_pressure_combo.currentData() == "igra"
+    tab.run_on_design()
+    igra = tab.on_design
+    assert igra["base_pressure"] == "igra" and igra["CD_base"] > 0.0
+    assert "CD_base" in tab.output_label.text()
+    assert tab._build_run_config().sweep.base_pressure == "igra"
+    tab.base_pressure_combo.setCurrentIndex(tab.base_pressure_combo.findData("freestream"))
+    tab.run_on_design()
+    assert tab.on_design["CD_base"] == 0.0
+    assert tab.on_design["LD"] > igra["LD"]
+    tab.base_pressure_combo.setCurrentIndex(tab.base_pressure_combo.findData("igra"))

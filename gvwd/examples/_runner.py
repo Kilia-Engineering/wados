@@ -88,6 +88,7 @@ def run_from_config(cfg_path_or_obj,
                 altitude_km=cfg.sweep.altitude_km,
                 T_w=cfg.sweep.T_w,
                 Re_x_tr=cfg.sweep.Re_x_tr,
+                base_pressure=cfg.sweep.base_pressure,
             )
             on_design_clean = {
                 k: v for k, v in on_design.items()
@@ -110,6 +111,7 @@ def run_from_config(cfg_path_or_obj,
             altitude_km=cfg.sweep.altitude_km,
             T_w=cfg.sweep.T_w,
             Re_x_tr=cfg.sweep.Re_x_tr,
+            base_pressure=cfg.sweep.base_pressure,
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)

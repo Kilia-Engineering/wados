@@ -120,6 +120,7 @@ class SweepRunConfig:
     altitude_km: float = 30.0
     T_w: float = 1500.0
     Re_x_tr: float = 1.0e6
+    base_pressure: str = "freestream"      # aero_corrections.BASE_MODELS
 
 
 @dataclass

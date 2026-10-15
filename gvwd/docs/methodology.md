@@ -116,6 +116,26 @@ The 1e-6-rad threshold instead of zero handles the floating-point
 spillover at α = ±π/2 (`cos(±π/2) ≈ 6e-17`) that previously caused
 non-bracketing brentq calls.
 
+### Base pressure
+
+Panels turned more than 20° from the flow (`θ_local < −20°`,
+`BASE_TURN_DEG`) are the base: the faces PySAGAS leaves at vacuum.
+They take the base pressure of the chosen model,
+`Cp_b = 2 (p_b/p∞ − 1) / (γ M∞²)`:
+
+| `base_pressure` | p_b |
+|---|---|
+| `freestream` (library default) | p∞, i.e. `Cp_b = 0` as before |
+| `igra` (GVWD tab default) | Igra 2018, Eq. (6), from Guidi et al. 2003: 0.25 p∞ at M 5, 0.21 p∞ at M 6, 0.11 p∞ at M 14 |
+| `maxwell` | p∞ / M∞ |
+| `vacuum` | 0 |
+
+`CD_base` is the base panels' drag; it is part of `CD_wave`. The model is set
+by `aero_coefficients_full(..., base_pressure=...)`,
+`SweepConfig.base_pressure`, or `base_pressure:` under `sweep:` in a run
+YAML. The Aero Analysis and Optimization tabs use the same models
+(`aero_corrections.py`).
+
 Force integration:
 
 ```
@@ -134,7 +154,8 @@ references). All coefficients are returned in this normalisation.
 friction coefficient with Sutherland viscosity and the van Driest II
 compressibility correction. Boundary-layer transition is fixed at
 `Re_x_tr` (default 1e6); panels with `Re_x < Re_x_tr` use laminar
-`Cf_lam`, otherwise turbulent `Cf_turb`. The friction integral
+`Cf_lam`, otherwise turbulent `Cf_turb`. Every panel but the base carries
+friction, including panels parallel to the flow. The friction integral
 contributes `CD_friction` to the `aero_coefficients_full` output;
 `CD_total = CD_wave + CD_friction`.
 
@@ -150,9 +171,8 @@ contributes `CD_friction` to the `aero_coefficients_full` output;
 * No real-gas chemistry. The library is `γ = 1.4` ideal-gas
   throughout. The `gamma` argument exists but the validation
   envelope is calibrated against the constant-γ choice.
-* Base flow is treated as `Cp = 0` (no base-drag model). For
-  engineering modes the base panel does contribute `CD_wave`
-  through Newtonian fall-back at α ≠ 0.
+* The base pressure is a Mach-number correlation (or `Cp = 0`), not a
+  computed base flow.
 
 These limits are why the GUI tab labels engineering-mode results
 as "engineering panel-method estimate, not CFD-grade." Use the

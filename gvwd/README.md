@@ -146,7 +146,8 @@ bit-identical geometry.stl output. See `docs/methodology.md` §7.
 
 GVWD is an **engineering** tool, not a CFD solver. The panel method
 is tangent-wedge with Newtonian fall-back, ideal-gas (γ=1.4),
-no shock interactions, no real-gas chemistry, base-flow `Cp = 0`.
+no shock interactions, no real-gas chemistry, and a base pressure taken
+from a Mach-number correlation (or `Cp = 0`), not a computed base flow.
 Use the sweep grid to bracket trends; do **not** treat absolute
 drag predictions as <5%-accurate. See `docs/methodology.md` §4
 for the full scope statement.

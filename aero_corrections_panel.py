@@ -1,7 +1,8 @@
 """Controls for the base-pressure and skin-friction corrections (aero_corrections).
 
 The Aero Analysis and Optimization tabs show the same group; ``corrections()``
-gives the ``AeroCorrections`` to pass on.
+gives the ``AeroCorrections`` to pass on. The GVWD tab, which has its own
+friction settings, uses ``base_pressure_combo`` alone.
 """
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox, QLabel
@@ -31,6 +32,21 @@ assert {k for k, *_ in _BASE_ITEMS} == set(BASE_MODELS)
 assert {k for k, *_ in _FRICTION_ITEMS} == set(FRICTION_MODELS)
 
 
+def base_pressure_combo(model: str = "igra") -> QComboBox:
+    """The base-pressure choice; ``currentData()`` is the model key."""
+    combo = QComboBox()
+    for key, text, tip in _BASE_ITEMS:
+        combo.addItem(text, key)
+        combo.setItemData(combo.count() - 1, tip, Qt.ToolTipRole)
+    combo.setToolTip(
+        "Pressure on the base (the faces turned more than 20° from the flow,\n"
+        "which PySAGAS leaves at vacuum). Going from p_b = p∞ to the\n"
+        "correlation lowered L/D by 6 % at Mach 14 and by 19 % at Mach 8\n"
+        "(Igra 2018, Table 2; 2019, Table 1).")
+    combo.setCurrentIndex(combo.findData(model))
+    return combo
+
+
 class AeroCorrectionsGroup(QGroupBox):
     """Base pressure, skin friction, transition Reynolds number and wall temperature."""
 
@@ -39,14 +55,7 @@ class AeroCorrectionsGroup(QGroupBox):
         layout = QGridLayout(self)
 
         layout.addWidget(QLabel("Base pressure:"), 0, 0)
-        self.base_combo = QComboBox()
-        for key, text, tip in _BASE_ITEMS:
-            self.base_combo.addItem(text, key)
-            self.base_combo.setItemData(self.base_combo.count() - 1, tip, Qt.ToolTipRole)
-        self.base_combo.setToolTip(
-            "Pressure on the base (the faces PySAGAS leaves at vacuum).\n"
-            "Going from p_b = p∞ to the correlation lowered L/D by 6 % at\n"
-            "Mach 14 and by 19 % at Mach 8 (Igra 2018, Table 2; 2019, Table 1).")
+        self.base_combo = base_pressure_combo()
         layout.addWidget(self.base_combo, 0, 1)
 
         layout.addWidget(QLabel("Skin friction:"), 1, 0)

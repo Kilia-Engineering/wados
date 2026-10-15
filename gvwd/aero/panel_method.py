@@ -8,6 +8,10 @@ Algorithm per spec §4.8:
      - if theta_local <= 0   : Cp = 0      (shadow)
      - if 0 < theta_local <= theta_max(M_inf) : tangent-wedge attached
      - if theta_local > theta_max(M_inf)      : modified Newtonian
+     - if theta_local < -20 deg (the base, the faces PySAGAS leaves at
+       vacuum): Cp of the base pressure, Cp_b = 2 (p_b/p_inf - 1)/(gamma M^2)
+       with p_b from ``aero_corrections.base_pressure_ratio`` ("freestream",
+       the default, is the shadow Cp = 0; "igra" is Igra 2018 Eq. (6))
   3. Force per panel (per unit q_inf): dF = -Cp A n̂.
   4. Sum and project onto lift / drag / pitching-moment axes.
 
@@ -27,6 +31,8 @@ import numpy as np
 from gvwd.geometry.mesh import Mesh
 from gvwd.thermo.tangent_wedge import tangent_wedge_cp_array
 
+BASE_TURN_DEG = 20.0       # faces turned further from the flow are the base
+
 
 @dataclass
 class PanelAeroResult:
@@ -45,6 +51,8 @@ class PanelAeroResult:
     L_ref: float                    # reference length
     M_inf: float
     alpha_deg: float
+    CD_base: float = 0.0            # base drag (the base faces' share of CD)
+    base_pressure: str = "freestream"
 
 
 def freestream_direction(alpha_rad: float) -> np.ndarray:
@@ -84,6 +92,7 @@ def panel_aero_coefficients(
     S_ref: Optional[float] = None,
     L_ref: Optional[float] = None,
     x_ref: Optional[float] = None,
+    base_pressure: str = "freestream",
 ) -> PanelAeroResult:
     """Inviscid surface-panel aero on a closed Mesh.
 
@@ -99,7 +108,12 @@ def panel_aero_coefficients(
                   the streamwise extent of the mesh (max x - min x) is used.
     x_ref       : streamwise position of the moment reference [m]. If None,
                   the streamwise midpoint is used.
+    base_pressure : base-pressure model for the faces turned more than
+                  BASE_TURN_DEG from the flow (``aero_corrections.BASE_MODELS``:
+                  "freestream", "igra", "maxwell" or "vacuum").
     """
+    from aero_corrections import base_pressure_ratio
+
     v_inf = freestream_direction(alpha_rad)
     z_lift = lift_direction(alpha_rad)
 
@@ -111,8 +125,12 @@ def panel_aero_coefficients(
     n_dot_v = np.clip(n @ v_inf, -1.0, 1.0)
     theta_local = -np.arcsin(n_dot_v)
 
-    # Cp via tangent-wedge with Newtonian fallback.
+    # Cp via tangent-wedge with Newtonian fallback; the base gets the
+    # base-pressure model's Cp (shadow Cp = 0 is p_b = p_inf)
     Cp, regime_code = tangent_wedge_cp_array(M_inf, theta_local, gamma)
+    base = theta_local < -math.radians(BASE_TURN_DEG)
+    Cp = np.where(base, 2.0 * (base_pressure_ratio(base_pressure, M_inf, gamma) - 1.0)
+                  / (gamma * M_inf * M_inf), Cp)
 
     # Per-face force per unit dynamic pressure: dF_aero = -Cp A n̂
     F_pf = -Cp[:, None] * A[:, None] * n
@@ -123,6 +141,7 @@ def panel_aero_coefficients(
     # propagation direction (drag opposes body motion; body moves in
     # -v_inf in inertial frame, so drag-on-body is in +v_inf direction).
     D_q = float(F_total @ v_inf)
+    D_base_q = float(F_pf[base].sum(axis=0) @ v_inf)
 
     # Reference geometry
     if S_ref is None:
@@ -152,6 +171,7 @@ def panel_aero_coefficients(
         Cp=Cp, regime_code=regime_code, F_per_face=F_pf,
         S_ref=S_ref, L_ref=L_ref,
         M_inf=M_inf, alpha_deg=math.degrees(alpha_rad),
+        CD_base=D_base_q / S_ref, base_pressure=base_pressure,
     )
 
 
