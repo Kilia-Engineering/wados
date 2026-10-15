@@ -1217,13 +1217,10 @@ def compute_pre_blunted_streams(us_streams, ls_streams, radius, n_bezier=10,
         modified_lower.append(mod_ls)
         blunted_le.append(result['blunt_tip'])
 
-    # Resample all streams to a uniform length so interpPlate gets a
-    # regular grid (blunted stations may differ from non-blunted ones).
-    if modified_upper:
-        target_n = max(s.shape[0] for s in modified_upper)
-        modified_upper = [_resample_stream(s, target_n) for s in modified_upper]
-        modified_lower = [_resample_stream(s, target_n) for s in modified_lower]
-
+    # The streams keep their own lengths: resampling them uniformly would
+    # space the points ~L/n apart and lose the mm-scale Bezier profile. The
+    # STEP export fits surfaces through them with LE clustering
+    # (cad_export.build_compensated_solid).
     return {
         'modified_upper': modified_upper,
         'modified_lower': modified_lower,

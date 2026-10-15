@@ -694,6 +694,13 @@ def _build_wingtip_face(us_streams, ls_streams):
         return None
 
 
+# G2 Bezier blunting in the STEP export: Bezier samples per half profile, and
+# points per stream for the surface fit (cosine-clustered: ~10 on the first
+# 20 mm of a 5 m stream)
+BLUNT_N_BEZIER = 24
+BLUNT_N_FIT = 200
+
+
 def to_CAD(waverider:waverider,sides : str,export: bool,filename: str,**kwargs):
 
     if "scale" in kwargs:
@@ -731,17 +738,17 @@ def to_CAD(waverider:waverider,sides : str,export: bool,filename: str,**kwargs):
         print(f"[PreBlunted G2] Computing G2 Bezier blunted geometry "
               f"(r={blunting_radius:.4f}m, sweep_scaled={sweep_scaled})")
         blunt_data = compute_pre_blunted_streams(
-            us_streams, ls_streams, blunting_radius,
+            us_streams, ls_streams, blunting_radius, n_bezier=BLUNT_N_BEZIER,
             sweep_scaled=sweep_scaled)
 
-        # Modified streams have Bezier points embedded, starting at blunt_tip
-        us_streams = blunt_data['modified_upper']
-        ls_streams = blunt_data['modified_lower']
-        # Shared LE boundary = blunt tip points
-        le = blunt_data['blunted_le']
-
-        # Fall through to the standard 4-face solid builder below
-        # (same code as the original path, using modified streams + blunted LE)
+        # The streams start at the blunt tip with the Bezier profile embedded.
+        # interpPlate cannot follow a mm-scale profile on a metre-scale plate
+        # (it failed on the OC tab's default design), so both faces are
+        # B-spline surfaces through the streams, clustered towards the LE.
+        left_side = build_compensated_solid(
+            blunt_data['modified_upper'], blunt_data['modified_lower'],
+            waverider.length, n_fit=BLUNT_N_FIT).scale(scale)
+        return _finish_sides(left_side, sides, export, filename, scale)
 
     if not use_pre_blunted:
         # compute LE from original streams
